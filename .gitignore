@@ -19,6 +19,9 @@ checkpoints/
 node_modules/
 web/dist/
 
+# release 打包产物
+dist/
+
 # env & secrets
 .env
 *.local

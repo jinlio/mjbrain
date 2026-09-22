@@ -36,9 +36,9 @@ pytest -q                             # 测试（依赖棋谱样本的用例缺�
 
 ### 权重
 
-微调权重**不随仓库分发**。下载后放到 `checkpoints/<run_id>/`（内含 `model.safetensors` + `encoder/` + `tokenizer/`），或启动时用 `--ckpt` 指向任意目录。
+微调权重随 [Releases](../../releases) 单独分发（发布后补充直链）。下载 zip 解压到 `checkpoints/<run_id>/`（内含 `model.safetensors` + `encoder/` + `tokenizer/` + `rl_agent_config.json`），或启动时用 `--ckpt` 指向任意目录。包内 `MODEL_CARD.md` 记载出处、训练数据、held-out 指标与使用限制，`SHA256SUMS` 供逐文件校验。
 
-> 权重发布地址：见 [Releases](../../releases)（发布后补充）。
+> 权重许可与上游约束见包内 `MODEL_CARD.md` 与 [LICENSES.md](LICENSES.md)；语料、决策样本、Mortal 代码均**不随仓库分发**。
 
 ### 试一手（档 0 · 手输局面）
 
