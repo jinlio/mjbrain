@@ -1,6 +1,6 @@
 # mjbrain
 
-**基于 [LAYA](https://github.com/NandhaKishorM/laya) 微调的立直麻将实时决策推荐系统**（4 人麻将，雀魂优先）——**只推荐，不自动**。
+基于 [LAYA](https://github.com/NandhaKishorM/laya) 微调的立直麻将实时决策推荐系统（4 人麻将，雀魂优先）。**只推荐，不自动。**
 
 ## 写在前面
 
@@ -10,10 +10,10 @@ Jev 本身不开源、无法定制，于是这次尝试基于开源的 LAYA 做�
 
 ## 特性
 
-- **只推荐，不自动**——零动作注入红线：不发出牌请求、不修改游戏状态，出牌永远由你自己按。实时数据走 web CDP **只读**订阅 WebSocket 帧（无证书、无系统代理）。
+- **只推荐，不自动**：零动作注入，不发出牌请求、不修改游戏状态，出牌永远由你自己按。实时数据走 web CDP 只读订阅 WebSocket 帧（无证书、无系统代理）。
 - **档 0 · 手输局面**：CLI 输入当前局面（手牌/副露/牌河/宝牌），立即给出推荐动作 + 候选概率分布 + 向听/听牌标注，牌桌间隙查一手。
 - **档 1 · 本地推荐服务**：`/v1/react` HTTP 服务接收 mjai 事件流，返回微调模型的推荐与候选分布；配套捕获管道（CDP → liqi 协议解码 → mjai 状态机 → 服务）可接入实时对局，也可离线重演棋谱。
-- **模型管模糊判断，代码管精确规则**：合法动作集、向听、点数全部由确定性代码生成，模型只在合法子集上做带概率的选择——不会打出手牌里没有的牌。
+- **模型管模糊判断，代码管精确规则**：合法动作集、向听、点数全部由确定性代码生成，模型只在合法子集上做带概率的选择，不会打出手牌里没有的牌。
 - **完整训练管线**：牌谱重演 → 决策点提取 → 教师软标签蒸馏（RLCD 风格，human × teacher 混合目标）→ 单卡微调（8-bit 优化器 + 梯度检查点，8GB 显存可训）；配套竞技场评测框架（同一发牌种子、席位轮换、按种子聚类 95% CI）。
 
 ## 快速开始
@@ -73,7 +73,7 @@ curl -s -X POST http://127.0.0.1:8765/v1/react \
 #     "decisions": [{"seat": 0, "legal_n": 15, "recommend": "dahai:W", "top": [...]}]}
 ```
 
-服务对输入只做**重放与推荐**：事件流原样重演出决策窗，在合法动作集上给出带概率的 top-N——不存在任何"替玩家发动作"的路径。健康检查 `GET /v1/health`。
+服务对输入只做重放与推荐：事件流原样重演出决策窗，在合法动作集上给出带概率的 top-N；服务端没有替玩家发动作的代码路径。健康检查 `GET /v1/health`。
 
 ### 实时捕获（可选，全程只读）
 
@@ -113,19 +113,19 @@ python scripts/live_from_capture.py --jsonl frames.jsonl --follow
 2. 教师软标签蒸馏：`train/rlcd_sft.py`——human × teacher 混合目标、分歧层退火、鸣牌加权，单卡 8GB 可训；
 3. `eval/arena` 竞技场出数，同一发牌种子 + 席位轮换，结论附 95% CI。
 
-训练过程全记录在 `runs/`（`RunLog` 自动归档 config / env / metrics / summary）。语料与教师参照模型**不随仓库分发**（见下方致谢）。
+训练过程全记录在 `runs/`（`RunLog` 自动归档 config / env / metrics / summary）。语料与教师参照模型不随仓库分发（见下方致谢）。
 
 ## 致谢
 
 - [LAYA](https://github.com/NandhaKishorM/laya) 与 [convaiinnovations/laya](https://huggingface.co/convaiinnovations/laya)——决策模型底座与检查点（Apache-2.0）
 - [Akagi](https://github.com/shinkuan/Akagi)——抓包/协议参考；`capture/` 为其 liqi/mjai 层的移植改写（Apache-2.0，声明见 [LICENSES.md](LICENSES.md)）
 - [riichienv](https://pypi.org/project/riichienv/)——规则引擎：合法动作、向听、牌谱重演（Apache-2.0）
-- [Mortal](https://github.com/herentus/mortal)——评估参照与蒸馏教师（研究用途，**未随本仓库分发**）
-- [tenhou-houou-mjai](https://huggingface.co/datasets/hhim8826/tenhou-houou-mjai)——训练语料（研究用途，**不随仓库分发**）
+- [Mortal](https://github.com/herentus/mortal)——评估参照与蒸馏教师（研究用途，未随本仓库分发）
+- [tenhou-houou-mjai](https://huggingface.co/datasets/hhim8826/tenhou-houou-mjai)——训练语料（研究用途，不随仓库分发）
 
 ## 许可证
 
-本项目采用 **Apache License 2.0**，见 [LICENSE](LICENSE)——与 Akagi / LAYA / riichienv 的许可兼容，可自由使用、修改、分发（保留声明）。
+本项目采用 **Apache License 2.0**，见 [LICENSE](LICENSE)。它与 Akagi / LAYA / riichienv 的许可兼容，可自由使用、修改、分发（保留声明）。
 
 第三方组件的归属与声明汇总在 [LICENSES.md](LICENSES.md)；请在分发衍生作品前复核其中的约束项。
 
