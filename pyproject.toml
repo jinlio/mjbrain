@@ -1,0 +1,16 @@
+# 本仓库用 conda 管理环境：依赖清单在 environment.yml（+ 可选重依赖见该文件注释）。
+# 这里只保留项目元信息和工具配置，不声明依赖，避免两处清单漂移。
+[project]
+name = "mjbrain"
+version = "0.0.1"
+description = "LAYA-based real-time mahjong decision engine (capture -> rules -> typed-decision model -> HUD)"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# vendor/ 是上游 AGPL 代码的内部裁剪，保持逐字保真优先于过 lint
+extend-exclude = ["vendor", "reference_notebook", "reference"]   # 第三方参考原文，不维护
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

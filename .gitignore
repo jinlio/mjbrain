@@ -1,0 +1,28 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# data & weights (never in git)
+data/raw/
+data/processed/
+models/
+checkpoints/
+*.safetensors
+*.pth
+*.onnx
+*.parquet
+
+# web
+node_modules/
+web/dist/
+
+# env & secrets
+.env
+*.local
+
+# reports
+eval/reports/
+capture/liqi/_gen/

@@ -1,0 +1,31 @@
+# conda 环境定义：唯一依赖清单（pyproject.toml 只保留工具配置）
+# 创建：conda env create -f environment.yml
+# 使用：conda activate mjbrain   （每次开工前先激活）
+name: mjbrain
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      # server / 基础
+      - fastapi>=0.115
+      - uvicorn>=0.30
+      - httpx>=0.27
+      - websockets>=12
+      - pydantic>=2.7
+      - riichienv>=0.4.10   # 规则引擎/模拟器（Apache-2.0，见 LICENSES.md）
+      - pyarrow>=16         # 数据管线（build_decisions/trainer 必需）
+      - grpcio-tools>=1.60  # capture/liqi 描述符编译（scripts/compile_liqi_proto.py → _gen/）
+      - sentencepiece>=0.2  # laya 检查点 tokenizer 转换必需（fast tokenizer 后端）
+      - bitsandbytes>=0.49  # train --opt adamw8bit：8GB 显存的 8-bit 优化态（bench 六配置定谳）
+      # dev
+      - pytest>=8
+      - ruff>=0.6
+      # 可选（体积大，按需手动取消注释或单独 pip install）：
+      # - torch==2.6.0    # 已装 CUDA 构建 2.6.0+cu124（RTX 4060 验证通过）。
+      #                   # PyPI 的 win/cp312 wheel 默认就是 +cu124；若清华源只给 +cpu 版，
+      #                   # 从本机 pip HTTP 缓存取 wheel 离线安装（见 README 网络提示）。
+      # - laya            # 推理：会拉 torch，CPU 版即可先跑
+      # - pandas>=2.2
+      # - tqdm>=4.66
