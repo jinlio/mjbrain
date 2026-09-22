@@ -8,7 +8,7 @@
 |---|---|---|---|
 | [Akagi](https://github.com/shinkuan/Akagi)（`capture/liqi`、`capture/mjai` 的移植改写；`reference/akagi-v3/` 为上游原文快照） | 抓包帧解码、liqi 协议、mjai 状态机参考 | Apache-2.0 | 保留本声明与上游版权信息；移植文件保留来源标注 |
 | [LAYA](https://github.com/NandhaKishorM/laya)（推理/训练调用面） | 决策模型底座 | Apache-2.0 | 保留声明 |
-| ModernBERT / mmBERT（LAYA 底座架构） | 编码器 | Apache-2.0 | 随 LAYA 声明 |
+| [ModernBERT](https://github.com/AnswerDotAI/ModernBERT)（本项目所用 LAYA 检查点的底座）/ [mmBERT](https://huggingface.co/jhu-clsp/mmBERT-base)（LAYA 多语变体底座） | 编码器 | Apache-2.0 / MIT | 各自保留声明；均已核验（GitHub LICENSE / HF 模型卡） |
 | [riichienv](https://pypi.org/project/riichienv/) | 规则引擎（合法动作/模拟/牌谱重演） | Apache-2.0 | 保留声明 |
 | [transformers](https://github.com/huggingface/transformers)、PyTorch 等运行依赖 | 训练/推理框架 | 各自许可（Apache-2.0 / BSD 等） | 见各包 LICENSE |
 
