@@ -40,6 +40,7 @@ METHOD_NOTIFY_GAME_TERMINATE = "lq.NotifyGameTerminate"
 METHOD_SYNC_GAME = ".lq.FastTest.syncGame"
 METHOD_ENTER_GAME = ".lq.FastTest.enterGame"
 
+ACTION_MJ_START = "ActionMJStart"  # 空标记（proto 消息本身为空）；Akagi 同为 no-op
 ACTION_NEW_ROUND = "ActionNewRound"
 ACTION_DEAL_TILE = "ActionDealTile"
 ACTION_DISCARD_TILE = "ActionDiscardTile"
@@ -256,6 +257,8 @@ class MajsoulState:
     def handle_action_prototype(self, payload: dict) -> list[dict]:
         name = payload.get("name")
         data = payload.get("data")
+        if name == ACTION_MJ_START and data is None:
+            return []  # 空标记消息，不带牌局状态（proto 无字段，Akagi 同为 no-op）
         if not isinstance(name, str) or data is None:
             log.warning("ActionPrototype missing name/data: %s", str(payload)[:200])
             return []
@@ -536,6 +539,8 @@ class MajsoulState:
         events: list[dict] = []
         for action in actions:
             name, b64 = action.get("name"), action.get("data")
+            if name == ACTION_MJ_START and b64 is None:
+                continue  # 空标记（同步流里连 data 键都没有）；带 data 的形状照常解码
             if not isinstance(name, str) or not isinstance(b64, str):
                 log.warning("GameRestore action missing name/data: %s", str(action)[:120])
                 continue

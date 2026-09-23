@@ -243,6 +243,30 @@ def test_chi_pon_consumed_layout():
     assert ev2[0]["consumed"] == ["3s", "3s"] and ev2[0]["target"] == 2
 
 
+def test_mj_start_marker_is_silent_noop(caplog):
+    """ActionMJStart 是空标记消息（proto 消息本身为空），非畸形：静默跳过、不告警。"""
+    st = _authed_state()
+    with caplog.at_level("WARNING", logger="mjbrain.capture.mjai"):
+        assert _events(st, "ActionMJStart", None) == []
+    assert "ActionPrototype missing" not in caplog.text
+    # 真正的畸形（未知名字 + 缺 data）仍须告警
+    with caplog.at_level("WARNING", logger="mjbrain.capture.mjai"):
+        assert _events(st, "ActionWeird", None) == []
+    assert "ActionPrototype missing" in caplog.text
+
+
+def test_game_restore_skips_mj_start_marker(caplog):
+    """GameRestore 里的 ActionMJStart 是空标记（连 data 键都没有），跳过且不告警。"""
+    calls = []
+    st = MajsoulState(decode_restore=lambda name, b64: calls.append(name) or {})
+    with caplog.at_level("WARNING", logger="mjbrain.capture.mjai"):
+        ev = st.handle_game_restore({"game_restore": {"actions": [
+            {"name": "ActionMJStart", "step": 0},
+        ]}})
+    assert ev == [] and calls == []   # 标记不送去解码
+    assert "GameRestore action missing" not in caplog.text
+
+
 def test_omitted_zero_scalars_chi_and_pon():
     """proto3 零值省略：type=0（吃）、seat=0 时缺键即默认（run5 实测 payload 形状）。"""
     st = _authed_state()
