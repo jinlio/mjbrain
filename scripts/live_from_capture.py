@@ -1,11 +1,16 @@
 #!/usr/bin/env python
-"""M4 档1 实时推荐客户端：捕获 JSONL → mjai 事件流 → POST /v1/react → 打印。
+"""M4 档1 实时推荐客户端：捕获 JSONL → mjai 事件流 → POST /v1/react → 打印+落盘。
 
 读 scripts/run_capture.py 落盘的 JSONL（每行 {"dir":..,"b64":..}）：
   每行 base64 → capture.liqi runtime 的 parser.parse → Frame →
   MajsoulState.dispatch → mjai 事件累加；每当流有新事件，把**全量流**
   POST 给 advisor/server.py 的 /v1/react（服务端重放出决策窗），
   自家座位开窗时打印 B3 推荐 + top 候选。
+
+模型表现记录：每个成功响应追加一行到 `<输入名>.advise.jsonl`
+（`--log` 改路径、`--no-log` 关闭），行= {"ts","event_n","seat","resp"}，
+行缓冲随写随刷——事后与帧 JSONL（实际打法）对照即得
+"模型推荐 vs 实际出牌"逐窗记录；缺位审计=数 window:true 的行。
 
 前置：另开一个进程跑推荐服务
     python -m advisor.server            # 127.0.0.1:8765，启动即预热权重
@@ -28,6 +33,9 @@ import sys
 import time
 import urllib.error
 import urllib.request
+
+# 推荐记录计数（顶层 finally 打印汇总用：Ctrl-C 退出也能看到行数）
+STAT = {"path": None, "n": 0}
 
 
 def post_react(url: str, payload: dict, timeout: float = 30.0) -> dict:
@@ -87,6 +95,9 @@ def main(argv=None) -> int:
     ap.add_argument("--follow", action="store_true",
                     help="尾随模式：读到文件尾不退出，等捕获追加")
     ap.add_argument("--poll", type=float, default=0.1, help="--follow 轮询秒")
+    ap.add_argument("--log", type=pathlib.Path, default=None,
+                    help="推荐记录 JSONL 路径（默认 <输入名>.advise.jsonl）")
+    ap.add_argument("--no-log", action="store_true", help="不落盘推荐记录")
     args = ap.parse_args(argv)
 
     while args.follow and not args.jsonl.exists():
@@ -95,6 +106,13 @@ def main(argv=None) -> int:
     if not args.jsonl.exists():
         print(f"文件不存在: {args.jsonl}", file=sys.stderr)
         return 1
+
+    log_fh = None
+    if not args.no_log:
+        log_path = args.log or args.jsonl.with_name(args.jsonl.stem + ".advise.jsonl")
+        log_fh = log_path.open("a", encoding="utf-8", buffering=1)  # 行缓冲=随写随刷
+        STAT["path"] = str(log_path)
+        print(f"推荐记录 -> {log_path}")
 
     from capture.liqi import runtime
 
@@ -124,6 +142,13 @@ def main(argv=None) -> int:
                           "确认 python -m advisor.server 在跑，持续重试", file=sys.stderr)
                     last_err = ex
                 continue
+            if log_fh is not None:
+                rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                       "event_n": len(events),
+                       "seat": body.get("seat"),
+                       "resp": resp}
+                log_fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                STAT["n"] += 1
             if "error" in resp:
                 print(f"服务端：{resp['error']}（applied={resp.get('applied')}）",
                       file=sys.stderr)
@@ -136,4 +161,12 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    code = 0
+    try:
+        code = main()
+    except KeyboardInterrupt:
+        pass  # Ctrl-C 静默退出；记录行缓冲已刷盘
+    finally:
+        if STAT["path"]:
+            print(f"推荐记录汇总 -> {STAT['path']}（{STAT['n']} 行）")
+    raise SystemExit(code)
