@@ -1,13 +1,13 @@
 @echo off
-rem ä¸€é”®å¯åŠ¨ mjbrain demoï¼šA æŽ¨èæœåŠ¡ / B CDP æ•èŽ·(å¼¹æµè§ˆå™¨) / C å®žæ—¶æŽ¨èï¼Œä¸‰ä¸ªç‹¬ç«‹çª—å£ã€‚
-rem å…³é—­å¯¹åº”çª—å£å³åœæ­¢è¯¥ç»„ä»¶ã€‚--dry åªæ‰“å°è§£æžç»“æžœä¸å¯åŠ¨ï¼ˆé¢„æ£€ç”¨ï¼‰ã€‚
+rem Ò»¼üÆô¶¯ mjbrain demo£ºA ÍÆ¼ö·þÎñ / B CDP ²¶»ñ(µ¯ä¯ÀÀÆ÷) / C ÊµÊ±ÍÆ¼ö£¬Èý¸ö¶ÀÁ¢´°¿Ú¡£
+rem ¹Ø±Õ¶ÔÓ¦´°¿Ú¼´Í£Ö¹¸Ã×é¼þ¡£--dry Ö»´òÓ¡½âÎö½á¹û²»Æô¶¯£¨Ô¤¼ìÓÃ£©¡£
 setlocal
 
 set ROOT=%~dp0
 if "%ROOT:~-1%"=="\" set ROOT=%ROOT:~0,-1%
 
-rem pythonï¼šMJBRRAIN_PY çŽ¯å¢ƒå˜é‡å¯è¦†ç›–ï¼›å¦åˆ™æŒ‰å¸¸è§ conda å®‰è£…ä½ç½®æŽ¢æµ‹ï¼Œ
-rem éƒ½æ²¡æœ‰åˆ™é€€å›ž PATH çš„ pythonï¼ˆè‹¥æœåŠ¡çª—æŠ¥ç¼ºä¾èµ–ï¼Œè§ README å¿«é€Ÿå¼€å§‹æˆ–è‡ªè®¾ MJBRRAIN_PYï¼‰
+rem python£ºMJBRRAIN_PY »·¾³±äÁ¿¿É¸²¸Ç£»·ñÔò°´³£¼û conda °²×°Î»ÖÃÌ½²â£¬
+rem ¶¼Ã»ÓÐÔòÍË»Ø PATH µÄ python£¨Èô·þÎñ´°±¨È±ÒÀÀµ£¬¼û README ¿ìËÙ¿ªÊ¼»ò×ÔÉè MJBRRAIN_PY£©
 set PY=
 if defined MJBRRAIN_PY set PY=%MJBRRAIN_PY%
 if not defined PY if exist "%USERPROFILE%\anaconda3\envs\mjbrain\python.exe" set PY=%USERPROFILE%\anaconda3\envs\mjbrain\python.exe
@@ -17,17 +17,18 @@ if not defined PY if exist "C:\ProgramData\anaconda3\envs\mjbrain\python.exe" se
 if not defined PY if exist "D:\anaconda\envs\mjbrain\python.exe" set PY=D:\anaconda\envs\mjbrain\python.exe
 if not defined PY set PY=python
 
-rem æƒé‡æŽ¢æµ‹ï¼šæ•‘æ´åŒ…åŽŸç›˜ â†’ å‘å¸ƒåŒ…è§£åŽ‹ä½ â†’ gate å…œåº•ï¼ˆå¼€æºç‰ˆé€šå¸¸åªæœ‰ç¬¬äºŒçº§ï¼‰
+rem È¨ÖØÌ½²â£º¾ÈÔ®°üÔ­ÅÌ ¡ú ·¢²¼°ü½âÑ¹Î» ¡ú gate ¶µµ×£¨¿ªÔ´°æÍ¨³£Ö»ÓÐµÚ¶þ¼¶£©
 set CKPT=%ROOT%\dist\rescue-20260923\extracted\checkpoints
 if not exist "%CKPT%\model.safetensors" set CKPT=%ROOT%\checkpoints\m3-orig-0.7098
 if not exist "%CKPT%\model.safetensors" set CKPT=%ROOT%\checkpoints\20260921T184331Z-rlcd-gate
 if not exist "%CKPT%\model.safetensors" (
-    echo æ²¡æ‰¾åˆ°æƒé‡ã€‚æŠŠ Release zip è§£åŽ‹åˆ° %ROOT%\checkpoints\m3-orig-0.7098\ åŽé‡è¯•ã€‚
-    pause
+    echo Ã»ÕÒµ½È¨ÖØ¡£°Ñ Release zip ½âÑ¹µ½ %ROOT%\checkpoints\m3-orig-0.7098\ ºóÖØÊÔ¡£
+    echo °´ÈÎÒâ¼üÍË³ö...
+    pause >nul
     exit /b 1
 )
 
-rem æ¯å±€ä¸€ä¸ªæ–°å¸§æ–‡ä»¶ï¼ˆrun1ã€run2...ï¼‰ï¼šåŒå .advise.jsonl è‡ªåŠ¨è®°å½•æŽ¨è
+rem Ã¿¾ÖÒ»¸öÐÂÖ¡ÎÄ¼þ£¨run1¡¢run2...£©£ºÍ¬Ãû .advise.jsonl ×Ô¶¯¼ÇÂ¼ÍÆ¼ö
 set N=1
 :find
 set FRAMES=%ROOT%\data\raw\ms_frames\run%N%.jsonl
@@ -44,12 +45,13 @@ if /i "%~1"=="--dry" (
 )
 
 cd /d "%ROOT%"
-start "mjbrain A æŽ¨èæœåŠ¡"        "%PY%" -m advisor.server --ckpt "%CKPT%" --port 8765
-start "mjbrain B æ•èŽ· å¼¹æµè§ˆå™¨"   "%PY%" scripts\run_capture.py --url https://game.maj-soul.com/1/ --out "%FRAMES%"
-start "mjbrain C å®žæ—¶æŽ¨è"        "%PY%" scripts\live_from_capture.py --jsonl "%FRAMES%" --follow
+start "mjbrain A ÍÆ¼ö·þÎñ"        "%PY%" -m advisor.server --ckpt "%CKPT%" --port 8765
+start "mjbrain B ²¶»ñ µ¯ä¯ÀÀÆ÷"   "%PY%" scripts\run_capture.py --url https://game.maj-soul.com/1/ --out "%FRAMES%"
+start "mjbrain C ÊµÊ±ÍÆ¼ö"        "%PY%" scripts\live_from_capture.py --jsonl "%FRAMES%" --follow
 
-echo ä¸‰ä¸ªçª—å£å·²å¼€ï¼šA=æœåŠ¡(é¢„çƒ­çº¦15ç§’)  B=æ•èŽ·(ä¼šè‡ªåŠ¨å¼¹æµè§ˆå™¨)  C=å®žæ—¶æŽ¨è
-echo æœ¬å±€å¸§è®°å½•:     %FRAMES%
-echo      æŽ¨èè®°å½•: %ROOT%\data\raw\ms_frames\run%N%.advise.jsonl
-echo å…³é—­å¯¹åº”çª—å£å³åœæ­¢è¯¥ç»„ä»¶ã€‚
-pause
+echo Èý¸ö´°¿ÚÒÑ¿ª£ºA=·þÎñ(Ô¤ÈÈÔ¼15Ãë)  B=²¶»ñ(»á×Ô¶¯µ¯ä¯ÀÀÆ÷)  C=ÊµÊ±ÍÆ¼ö
+echo ±¾¾ÖÖ¡¼ÇÂ¼:     %FRAMES%
+echo      ÍÆ¼ö¼ÇÂ¼: %ROOT%\data\raw\ms_frames\run%N%.advise.jsonl
+echo ¹Ø±Õ¶ÔÓ¦´°¿Ú¼´Í£Ö¹¸Ã×é¼þ¡£
+echo °´ÈÎÒâ¼üÍË³ö£¨Èý¸ö´°¿Ú²»ÊÜÓ°Ïì£¬¹ØËüÃÇÇëÖ±½Óµã X£©...
+pause >nul

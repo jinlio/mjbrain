@@ -105,7 +105,6 @@ python scripts/live_from_capture.py --jsonl frames.jsonl --follow
 
 > 懒人版：双击仓库根目录 `run_demo.bat` 一键开三个窗口（服务 / 捕获 / 推荐），
 > 帧文件自动按局定名（`run1.jsonl`、`run2.jsonl`…），权重自动找 `checkpoints/` 下的解压位置。
-```
 
 ## 架构
 
