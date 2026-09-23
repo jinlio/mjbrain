@@ -54,7 +54,9 @@ def main() -> int:
 
     t0 = time.time()
     n = {"c": 0}
-    with out.open("a", encoding="utf-8") as fh:
+    # 行缓冲：实时客户端（live_from_capture --follow）尾随读本文件，默认 8KB 块
+    # 缓冲会让帧攒满一整块才落盘（实测滞后 5~96s），建议响应随之"极慢"
+    with out.open("a", encoding="utf-8", buffering=1) as fh:
 
         def sink(direction: str, url: str, rid: str, data: bytes) -> None:
             n["c"] += 1

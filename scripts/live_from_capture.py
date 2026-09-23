@@ -5,10 +5,11 @@
   每行 base64 → capture.liqi runtime 的 parser.parse → Frame →
   MajsoulState.dispatch → mjai 事件累加；每当流有新事件，把**全量流**
   POST 给 advisor/server.py 的 /v1/react（服务端重放出决策窗），
-  自家座位开窗时打印 B3 推荐 + top 候选。
+  自家座位开窗时打印 B3 推荐 + top 候选（mjai 原串经 advisor.zh 映射成中文）。
 
 模型表现记录：每个成功响应追加一行到 `<输入名>.advise.jsonl`
-（`--log` 改路径、`--no-log` 关闭），行= {"ts","event_n","seat","resp"}，
+（`--log` 改路径、`--no-log` 关闭），行= {"ts","event_n","seat","rtt_s",
+"zh_recommend","zh_top","resp"}，
 行缓冲随写随刷——事后与帧 JSONL（实际打法）对照即得
 "模型推荐 vs 实际出牌"逐窗记录；缺位审计=数 window:true 的行。
 
@@ -20,7 +21,8 @@
 红线自查：本脚本只读 JSONL、只发本机 HTTP 建议请求；对雀魂客户端
 零接触、零写入（动作注入禁止）。
 
---follow 尾随模式：文件边写边读，读到尾 sleep 重试；捕获进程追加帧即出推荐。
+--follow 尾随模式：文件边写边读，读到尾 sleep 重试；捕获进程追加帧即出推荐
+（依赖捕获侧行缓冲落盘——run_capture.py 已 buffering=1，块缓冲会让帧滞后整块）。
 """
 
 from __future__ import annotations
@@ -35,6 +37,8 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
+from advisor import zh  # noqa: E402 —— 显示层中文映射（日志 resp 仍存 mjai 原串）
 
 # 推荐记录计数（顶层 finally 打印汇总用：Ctrl-C 退出也能看到行数）
 STAT = {"path": None, "n": 0}
@@ -55,8 +59,10 @@ def fmt_decision(d: dict) -> str:
         return f"座位{d['seat']}: 无决策窗"
     if "error" in d:
         return f"座位{d['seat']}: {d['error']}"
-    top = "  ".join(f"{t['a']} {t['p'] * 100:.1f}%" for t in d.get("top", [])[:3])
-    return f"[{time.strftime('%H:%M:%S')}] 座位{d['seat']} 候选{d['legal_n']} → {d['recommend']} | {top}"
+    top = "  ".join(f"{zh.action_zh(t['a'])} {t['p'] * 100:.1f}%"
+                    for t in d.get("top", [])[:3])
+    return (f"[{time.strftime('%H:%M:%S')}] 座位{d['seat']} 候选{d['legal_n']}"
+            f" → {zh.action_zh(d['recommend'])} | {top}")
 
 
 def feed_lines(p, st, events: list[dict], lines) -> bool:
@@ -120,6 +126,7 @@ def main(argv=None) -> int:
 
     p, st = runtime.make_stack()
     events: list[dict] = []
+    LAST: dict = {}          # 各座位上次已打印的决策签名（同一决策窗重复回应不刷屏）
     last_err = None
     with args.jsonl.open(encoding="utf-8") as fh:
         while True:
@@ -135,6 +142,7 @@ def main(argv=None) -> int:
             body = {"events": events, "top": args.top}
             if seat is not None:
                 body["seat"] = int(seat)
+            t_post = time.perf_counter()
             try:
                 resp = post_react(args.url, body)
                 last_err = None
@@ -144,11 +152,22 @@ def main(argv=None) -> int:
                           "确认 python -m advisor.server 在跑，持续重试", file=sys.stderr)
                     last_err = ex
                 continue
+            rtt = time.perf_counter() - t_post
             if log_fh is not None:
                 rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
                        "event_n": len(events),
                        "seat": body.get("seat"),
+                       "rtt_s": round(rtt, 3),
+                       "zh_recommend": None,
+                       "zh_top": None,
                        "resp": resp}
+                decs = [x for x in resp.get("decisions", []) if "recommend" in x]
+                picked = next((x for x in decs if x.get("seat") == body.get("seat")),
+                              decs[0] if decs else None)
+                if picked is not None:
+                    rec["zh_recommend"] = zh.action_zh(picked["recommend"])
+                    rec["zh_top"] = [[zh.action_zh(t["a"]), t["p"]]
+                                     for t in picked.get("top", [])]
                 log_fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 STAT["n"] += 1
             if "error" in resp:
@@ -156,7 +175,19 @@ def main(argv=None) -> int:
                       file=sys.stderr)
                 continue
             for d in resp.get("decisions", []):
-                print(fmt_decision(d), flush=True)
+                seat_d = d.get("seat")
+                if d.get("window") is False:
+                    LAST.pop(seat_d, None)   # 窗口关闭：清记忆，下次开窗重新打印
+                    continue
+                if "error" in d:
+                    print(f"座位{seat_d}: {d['error']}", file=sys.stderr)
+                    continue
+                sig = (d.get("recommend"), d.get("legal_n"),
+                       tuple(t["a"] for t in d.get("top", [])))
+                if LAST.get(seat_d) == sig:  # 同一决策窗的重复回应不刷屏
+                    continue
+                LAST[seat_d] = sig
+                print(f"{fmt_decision(d)} | 往返 {rtt:.2f}s", flush=True)
     if events:
         print(f"共 {len(events)} 个 mjai 事件入流。")
     return 0
