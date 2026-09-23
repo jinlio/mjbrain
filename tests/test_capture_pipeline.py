@@ -19,7 +19,9 @@ from google.protobuf import message_factory
 from capture.liqi.decode import NOTIFY, wtf_decode
 
 _gen = pathlib.Path(__file__).parents[1] / "capture" / "liqi" / "_gen" / "liqi_pb2.py"
-pytestmark = pytest.mark.skipif(not _gen.exists(), reason="先跑 scripts/compile_liqi_proto.py")
+# 只有走真 protobuf 的两条用例需要 _gen（生成物不进 git）；显示层用例纯格式化，
+# 无生成码也能跑——故按用例打标而非整文件 skip。
+needs_gen = pytest.mark.skipif(not _gen.exists(), reason="先跑 scripts/compile_liqi_proto.py")
 
 
 def _load_glue():
@@ -62,6 +64,7 @@ def _line(frame: bytes) -> str:
                        "len": len(frame), "b64": base64.b64encode(frame).decode()})
 
 
+@needs_gen
 def test_jsonl_to_mjai_events(tmp_path):
     from capture.liqi import runtime
 
@@ -91,6 +94,7 @@ def test_jsonl_to_mjai_events(tmp_path):
                            "tsumogiri": True}]
 
 
+@needs_gen
 def test_feed_lines_no_events_on_irrelevant_frame():
     from capture.liqi import runtime
 
@@ -102,3 +106,28 @@ def test_feed_lines_no_events_on_irrelevant_frame():
     line = _line(bytes([0x7F]) + b"garbage")
     assert glue.feed_lines(p, st, events, [line]) is False
     assert events == []
+
+
+def test_fmt_decision_marks_own_seat():
+    """座位标注：自家座位加（自家），非自家/座位未知时不加（防"座位没变"误读）。"""
+    glue = _load_glue()
+    d = {"seat": 1, "legal_n": 3, "recommend": "dahai:5p",
+         "top": [{"a": "dahai:5p", "p": 0.5}]}
+    assert "座位1（自家） 候选3 → 切5饼" in glue.fmt_decision(d, my_seat=1)
+    assert "（自家）" not in glue.fmt_decision(d, my_seat=0)
+    assert "（自家）" not in glue.fmt_decision(d, None)
+    assert glue.fmt_decision({"seat": 1, "window": False}, 1) == "座位1（自家）: 无决策窗"
+    assert glue.fmt_decision({"seat": 2, "window": False}, 1) == "座位2: 无决策窗"
+
+
+def test_fmt_reach_chinese():
+    """立直宣言牌建议的显示行：mjai 串经 advisor.zh → 中文，取 top3。"""
+    glue = _load_glue()
+    line = glue.fmt_reach({
+        "legal_n": 3, "recommend": "dahai:W",
+        "top": [{"a": "dahai:W", "p": 0.583}, {"a": "dahai:7p", "p": 0.417},
+                {"a": "dahai:1s", "p": 0.05}, {"a": "dahai:9m", "p": 0.01}],
+    })
+    assert line.startswith("   ↳ 若立直：宣言牌 → 切西 ")
+    assert "切西 58.3%" in line and "切7饼 41.7%" in line and "切1索 5.0%" in line
+    assert "切9万" not in line  # 只显示 top3

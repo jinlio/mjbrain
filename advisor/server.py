@@ -48,6 +48,45 @@ def open_windows(env):
     return out
 
 
+def _has_reach(legal: list[str]) -> bool:
+    for s in legal:
+        try:
+            if json.loads(s).get("type") == "reach":
+                return True
+        except ValueError:  # noqa: PERF203 —— 非 JSON 串（不该出现）当作无立直
+            continue
+    return False
+
+
+def _reach_declare_window(events: list[dict], seat: int, adv, top: int) -> dict | None:
+    """立直两段式的第二段：替该座补 apply 一次 reach，取"宣言牌"窗再问模型。
+
+    riichienv 的 reach 是两步：先一个裸 reach 声明，再开一个只剩"保听打牌"的窗
+    （实测：主窗 15 项=dahai×14+reach；声明窗只剩保听的 1~3 项）。真实对局的
+    训练语料同构（reach 窗后紧跟宣言打牌窗，标的就是宣言牌），模型见过这类窗，
+    故本段纯推理/显示增强，不动权重。拿不到宣言窗（异常/无窗）→ None，主建议
+    不受影响；代价是每个立直可选窗多一次前向（CPU ~0.4s），立直窗本身很稀疏。
+    """
+    from riichienv import GameRule, RiichiEnv
+
+    env = RiichiEnv(game_mode="4p-red-half", rule=GameRule.default_mjsoul())
+    try:
+        for ev in events:
+            env.apply_event(ev)
+        env.apply_event({"actor": seat, "type": "reach"})
+        ob = env.get_observation(seat)
+    except Exception:  # noqa: BLE001,S110 —— 宣言窗是加分项，拿不到就省去
+        return None
+    if ob is None:
+        return None
+    legal = [str(a.to_mjai()) for a in ob.legal_actions()]
+    if not legal:
+        return None
+    ranked = adv.topk(ob, legal, top=top)
+    return {"legal_n": len(legal), "recommend": ranked[0][0],
+            "top": [{"a": a, "p": round(p, 4)} for a, p in ranked]}
+
+
 def react(events: list[dict], seat: int | None, ckpt: str,
           device: str | None, top: int = 5) -> dict:
     from riichienv import GameRule, RiichiEnv
@@ -75,10 +114,15 @@ def react(events: list[dict], seat: int | None, ckpt: str,
         except ValueError as ex:
             out["decisions"].append({"seat": pid, "error": str(ex)})
             continue
-        out["decisions"].append({
+        dec = {
             "seat": pid, "legal_n": len(legal),
             "recommend": ranked[0][0], "top": [{"a": a, "p": round(p, 4)}
-                                               for a, p in ranked]})
+                                               for a, p in ranked]}
+        if _has_reach(legal):  # 立直可选 → 附带"若立直，宣言牌切哪张"
+            fw = _reach_declare_window(events, pid, adv, top)
+            if fw is not None:
+                dec["reach"] = fw
+        out["decisions"].append(dec)
     return out
 
 

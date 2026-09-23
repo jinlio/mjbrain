@@ -8,10 +8,24 @@ from pathlib import Path
 
 import pytest
 
-from advisor.server import react
+from advisor.server import _has_reach, _reach_declare_window, react
 
 CKPT = Path("D:/projects/mjbrain/checkpoints/20260921T184331Z-rlcd-gate")
 PARQUET = Path("D:/projects/mjbrain/data/raw/tenhou_houou_mjai/data/tenhou-00000.parquet")
+
+# 合成立直局：庄家 111m222m333m45m99m + 摸 1z(E)。切 E 是唯一保听打牌（听 3m/6m），
+# 故主窗 15 项 = dahai×14 + 一个裸 reach，宣言窗只剩 dahai:E（riichienv 两段式：
+# 先声明，再开"只剩保听打牌"的窗）。tile 数以 13+tsumo 计——庄家在 start_kyoku
+# 里给 13 张、第 14 张走 tsumo 事件（与 capture/mjai/state.py 同形状）。
+REACH_HAND13 = ["1m", "1m", "1m", "2m", "2m", "2m", "3m", "3m", "3m",
+                "4m", "5m", "9m", "9m"]
+REACH_STREAM = [
+    {"type": "start_game", "id": "0", "names": ["a", "b", "c", "d"], "num_players": 4},
+    {"type": "start_kyoku", "bakaze": "E", "kyoku": 1, "honba": 0, "kyotaku": 0,
+     "oya": 0, "dora_marker": "1z", "scores": [25000] * 4, "num_players": 4,
+     "tehais": [REACH_HAND13, ["?"] * 13, ["?"] * 13, ["?"] * 13]},
+    {"type": "tsumo", "actor": 0, "pai": "1z"},
+]
 
 
 @pytest.fixture(scope="module")
@@ -36,6 +50,11 @@ def test_react_kifu_seat1(first89):
     assert d["recommend"].startswith("dahai:")
     ps = sum(x["p"] for x in d["top"])
     assert 0.9 < ps <= 1.001  # 温度 softmax：截 top5 前和=1
+    # 该窗立直可选 → 附带宣言牌段：只剩保听打牌的分布（实测 切西 58.3%/切7饼 41.7%）
+    r = d["reach"]
+    assert r["recommend"].startswith("dahai:")
+    assert r["legal_n"] >= 1
+    assert 0.9 < sum(x["p"] for x in r["top"]) <= 1.001
 
 
 def test_react_bad_stream_reports_error():
@@ -43,3 +62,28 @@ def test_react_bad_stream_reports_error():
     bad = [{"type": "start_kyoku"}]
     out = react(bad, seat=None, ckpt="unused-because-error-first", device="cpu")
     assert "error" in out and out["applied"] == 0
+
+
+# ---------- 立直两段式（宣言牌建议） ----------
+
+def test_has_reach_on_legal_strings():
+    assert _has_reach(['{"actor":0,"pai":"1m","type":"dahai"}',
+                       '{"actor":0,"type":"reach"}'])
+    assert not _has_reach(['{"actor":0,"pai":"1m","type":"dahai"}', "not-json"])
+    assert not _has_reach([])
+
+
+def test_reach_declare_window_absent_without_window():
+    # 13 张未摸牌局面：该座无决策窗 → 宣言段按 None 省去（不抛，也不碰 adviser）
+    assert _reach_declare_window(REACH_STREAM[:2], 0, object(), top=5) is None
+
+
+def test_react_reach_declaration_branch():
+    if not CKPT.exists():
+        pytest.skip("gate ckpt 不在")
+    out = react(REACH_STREAM, seat=0, ckpt=str(CKPT), device="cpu")
+    d = out["decisions"][0]
+    assert d["legal_n"] == 15 and d["recommend"] == "reach"
+    r = d["reach"]
+    assert r["legal_n"] == 1 and r["recommend"] == "dahai:E"  # 唯一保听 = 摸到的 1z
+    assert r["top"][0]["p"] == 1.0  # 单候选短路
