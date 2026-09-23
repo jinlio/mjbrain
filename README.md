@@ -125,6 +125,8 @@ python scripts/live_from_capture.py --jsonl frames.jsonl --follow
 | `eval/` | 竞技场：B0 随机 / B1 启发式 / B3 = LAYA 微调，席位轮换 + 95% CI |
 | `train/` | RLCD 蒸馏微调（软标签混合目标、单卡 8-bit） |
 | `data/` | 牌谱 → 决策点提取 |
+| `scripts/` | 入口脚本：帧捕获、棋谱重演、档 0 / 实时推荐、权重打包、环境自检 |
+| `reference/` | Akagi v3 上游源码快照（仅作移植对照，Apache-2.0，归属见 [LICENSES.md](LICENSES.md)） |
 | `tests/` | 全链路测试：真棋谱往返、帧解码金标、服务契约 |
 
 ## 训练
