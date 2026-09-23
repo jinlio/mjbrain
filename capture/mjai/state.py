@@ -361,10 +361,14 @@ class MajsoulState:
         return events
 
     def build_chi_peng_gang(self, data: dict) -> list[dict]:
-        actor = int(data["seat"])
-        kind = int(data["type"])
-        tiles = data["tiles"]
-        froms = data["froms"]
+        # proto3 零值标量在 MessageToDict 下整个省略：type=0（吃）、seat=0（0 家操作）
+        # 时该键不存在。缺键=默认值 0，不是协议畸形（模块头"与 Rust 原版的有意偏差"）
+        actor = int(data.get("seat", 0))
+        kind = int(data.get("type", 0))
+        tiles = data.get("tiles")
+        froms = data.get("froms")
+        if tiles is None or froms is None:
+            raise ValueError(f"ActionChiPengGang missing tiles/froms: {str(data)[:120]}")
         if len(tiles) != len(froms):
             raise ValueError(f"tiles/froms length mismatch {len(tiles)} vs {len(froms)}")
         target, pai, consumed = actor, "", []
@@ -401,8 +405,8 @@ class MajsoulState:
         raise ValueError(f"unknown ActionChiPengGang.type: {kind}")
 
     def build_an_gang_add_gang(self, data: dict) -> list[dict]:
-        actor = int(data["seat"])
-        kind = int(data["type"])
+        actor = int(data.get("seat", 0))  # 0 家省略 seat（proto3 零值），同 ChiPengGang
+        kind = int(data.get("type", 0))   # 合法值仅 2/3；缺键走下方 unknown 分支显式报错
         pai = ms_to_mjai(data["tiles"])  # 单数串：ankan=杠体，kakan=新加枚
         new_markers = self.consume_new_doras(data)
         events: list[dict] = []
@@ -455,7 +459,7 @@ class MajsoulState:
         return events
 
     def build_kita(self, data: dict) -> list[dict]:
-        actor = int(data["seat"])
+        actor = int(data.get("seat", 0))  # 同上：0 家省略 seat
         if self.num_players != 3:
             log.warning("ActionBaBei received in %sp flow", self.num_players)
         dora_markers = self.deferred_doras

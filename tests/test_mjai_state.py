@@ -243,6 +243,39 @@ def test_chi_pon_consumed_layout():
     assert ev2[0]["consumed"] == ["3s", "3s"] and ev2[0]["target"] == 2
 
 
+def test_omitted_zero_scalars_chi_and_pon():
+    """proto3 零值省略：type=0（吃）、seat=0 时缺键即默认（run5 实测 payload 形状）。"""
+    st = _authed_state()
+    ev = _events(st, "ActionChiPengGang",
+                 {"tiles": ["7s", "8s", "9s"], "froms": [0, 0, 1],
+                  "tile_states": [0, 0]})   # seat=0、type=0 均省略
+    assert ev == [{"type": "chi", "actor": 0, "target": 1,
+                   "pai": "9s", "consumed": ["7s", "8s"]}]
+    ev2 = _events(st, "ActionChiPengGang",
+                  {"type": 1, "tiles": ["1z", "1z", "1z"], "froms": [0, 0, 3]})
+    assert ev2 == [{"type": "pon", "actor": 0, "target": 3,
+                    "pai": "E", "consumed": ["E", "E"]}]
+
+
+def test_omitted_seat_zero_ankan_kakan_kita():
+    st = _authed_state()
+    st.doras = ["5m"]
+    ev = _events(st, "ActionAnGangAddGang", {"type": 3, "tiles": "5m"})  # seat 省略
+    assert ev == [{"type": "ankan", "actor": 0,
+                   "consumed": ["5mr", "5m", "5m", "5m"]}]
+    ev2 = _events(st, "ActionAnGangAddGang", {"type": 2, "tiles": "3z"})
+    assert ev2 == [{"type": "kakan", "actor": 0, "pai": "W",
+                    "consumed": ["W", "W", "W"]}]
+    st.num_players = 3
+    assert _events(st, "ActionBaBei", {}) == [{"type": "kita", "actor": 0, "pai": "N"}]
+
+
+def test_call_missing_tiles_froms_drops_event():
+    st = _authed_state()
+    assert _events(st, "ActionChiPengGang",
+                   {"seat": 1, "type": 1, "tiles": ["1z"]}) == []
+
+
 def test_chi_dropped_in_sanma():
     st = _authed_state()
     st.num_players = 3
