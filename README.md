@@ -99,6 +99,7 @@ python scripts/compile_liqi_proto.py
 # 1) CDP 只读订阅雀魂页面的 WebSocket 帧 → JSONL（自动拉起独立 profile 浏览器窗口）
 python scripts/run_capture.py --url https://game.maj-soul.com/1/ --out frames.jsonl
 # 2) 尾随帧文件 → 解码为 mjai 事件流 → POST /v1/react → 打印实时推荐
+#    每个决策窗的推荐同时落盘 frames.advise.jsonl（与帧文件对照即可复盘模型表现）
 python scripts/live_from_capture.py --jsonl frames.jsonl --follow
 ```
 
