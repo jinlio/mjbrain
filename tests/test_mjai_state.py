@@ -26,7 +26,7 @@ def _authed_state(seat=1):
         ],
         "game_config": {"meta": {"mode_id": 5, "room_id": 0}, "mode": {"mode": 2}},
     })
-    assert ev[0]["type"] == "start_game" and ev[0]["id"] == seat
+    assert ev[0]["type"] == "start_game" and ev[0]["id"] == str(seat)
     return st
 
 

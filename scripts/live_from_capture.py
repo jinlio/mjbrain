@@ -34,6 +34,8 @@ import time
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
 # 推荐记录计数（顶层 finally 打印汇总用：Ctrl-C 退出也能看到行数）
 STAT = {"path": None, "n": 0}
 

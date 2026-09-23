@@ -239,7 +239,7 @@ class MajsoulState:
         return [{
             "type": "start_game",
             "names": names_from_payload(payload, seat_list),
-            "id": self.seat,
+            "id": str(self.seat),  # mjai/riichienv 要字符串（Akagi Rust 侧整数 seat 在此转换）
             "num_players": self.num_players,
             "meta": {
                 "game_id": self.game_id,

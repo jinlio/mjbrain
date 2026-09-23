@@ -45,9 +45,9 @@ if /i "%~1"=="--dry" (
 )
 
 cd /d "%ROOT%"
-start "mjbrain A 推荐服务"        "%PY%" -m advisor.server --ckpt "%CKPT%" --port 8765
-start "mjbrain B 捕获 弹浏览器"   "%PY%" scripts\run_capture.py --url https://game.maj-soul.com/1/ --out "%FRAMES%"
-start "mjbrain C 实时推荐"        "%PY%" scripts\live_from_capture.py --jsonl "%FRAMES%" --follow
+start "mjbrain A 推荐服务"        cmd /k ""%PY%" -m advisor.server --ckpt "%CKPT%" --port 8765"
+start "mjbrain B 捕获 弹浏览器"   cmd /k ""%PY%" scripts\run_capture.py --url https://game.maj-soul.com/1/ --out "%FRAMES%""
+start "mjbrain C 实时推荐"        cmd /k ""%PY%" scripts\live_from_capture.py --jsonl "%FRAMES%" --follow"
 
 echo 三个窗口已开：A=服务(预热约15秒)  B=捕获(会自动弹浏览器)  C=实时推荐
 echo 本局帧记录:     %FRAMES%
