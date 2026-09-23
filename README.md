@@ -12,7 +12,7 @@ Jev 本身不开源、无法定制，于是这次尝试基于开源的 LAYA 做�
 
 - **只推荐，不自动**：零动作注入，不发出牌请求、不修改游戏状态，出牌永远由你自己按。实时数据走 web CDP 只读订阅 WebSocket 帧（无证书、无系统代理）。
 - **档 0 · 手输局面**：CLI 输入当前局面（手牌/副露/牌河/宝牌），立即给出推荐动作 + 候选概率分布 + 向听/听牌标注，牌桌间隙查一手。
-- **档 1 · 本地推荐服务**：`/v1/react` HTTP 服务接收 mjai 事件流，返回微调模型的推荐与候选分布；配套捕获管道（CDP → liqi 协议解码 → mjai 状态机 → 服务）可接入实时对局，也可离线重演棋谱。
+- **档 1 · 本地推荐服务**：`/v1/react` HTTP 服务接收 mjai 事件流，返回微调模型的推荐与候选分布；配套捕获管道（CDP → liqi 协议解码 → mjai 状态机 → 服务）可接入实时对局，也可离线重演棋谱。立直可选时会多给一段「若立直，宣言牌切哪张」的建议（对宣言牌窗再判一次）；`scripts/compare_advise.py` 可把推荐记录与实际打法逐窗对照（作者自用样本 90 窗：top-1 一致 89 次，实际打法 100% 落在 top-3 内）。
 - **模型管模糊判断，代码管精确规则**：合法动作集、向听、点数全部由确定性代码生成，模型只在合法子集上做带概率的选择，不会打出手牌里没有的牌。
 - **完整训练管线**：牌谱重演 → 决策点提取 → 教师软标签蒸馏（RLCD 风格，human × teacher 混合目标）→ 单卡微调（8-bit 优化器 + 梯度检查点，8GB 显存可训）；配套竞技场评测框架（同一发牌种子、席位轮换、按种子聚类 95% CI）。
 
@@ -27,7 +27,7 @@ Jev 本身不开源、无法定制，于是这次尝试基于开源的 LAYA 做�
 | 合法性保证 | 都由规则引擎负责（libriichi 状态机 / akochan 模拟器）——这点两边一样 | 同左；差别在耦合：riichienv 是独立环境层，同一份计算既喂模型文本，也喂复盘点数与 B1 兜底 |
 | 训练范式 | 自对局强化学习：百万局量级、多卡、天级以上，奖励 = 终局得分 | 离线蒸馏：Mortal 当教师为人类牌谱决策打软标签，human × teacher 混合目标（RLCD 风格、分歧层退火、鸣牌加权），单卡 8-bit + 梯度检查点、几小时一轮 |
 | 概率校准 | 输出原始策略概率 | 分桶温度逐跑重拟，top-N 连概率一起返回 |
-| 推理栈 | Rust（libriichi）+ PyTorch C++ 扩展，毫秒级 | Python/PyTorch，CPU 约 1 秒/决策窗（慢是实话）；超时另有启发式 B1 兜底 |
+| 推理栈 | Rust（libriichi）+ PyTorch C++ 扩展，毫秒级 | Python/PyTorch，CPU 实测约 0.4–0.6 秒/决策窗（本地自用 p90 0.51s、最慢 1.41s；慢是实话）；超时另有启发式 B1 兜底 |
 | 训练复现 | 多卡集群起步，家用机重跑同等强度不现实 | 8GB 显存的游戏机跑通全管线 |
 
 这笔架构交易换来三样：每步可解释（推荐自带向听/听牌/概率标注）、合法性与点数永远精确（规则只有一份代码）、训练管线家用可复现；付出的也有三样：推理吞吐不如 Rust 栈、没有搜索的事后修正、上限被教师水平和蒸馏数据量锁死——开头说的"离 Mortal 还很远"，主要就远在这三处。
@@ -52,7 +52,7 @@ pytest -q                             # 测试（依赖棋谱样本的用例缺�
 
 ### 权重
 
-微调权重随 [Releases](../../releases) 单独分发（发布后补充直链）。下载 zip 解压到 `checkpoints/<run_id>/`（内含 `model.safetensors` + `encoder/` + `tokenizer/` + `rl_agent_config.json`），或启动时用 `--ckpt` 指向任意目录。包内 `MODEL_CARD.md` 记载出处、训练数据、held-out 指标与使用限制，`SHA256SUMS` 供逐文件校验。
+微调权重随 [Releases](https://github.com/jinlio/mjbrain/releases/tag/m3-orig-0.7098) 单独分发：`m3-orig-0.7098`，zip 约 805 MB。下载后解压到 `checkpoints/<run_id>/`（内含 `model.safetensors` + `encoder/` + `tokenizer/` + `rl_agent_config.json`），或启动时用 `--ckpt` 指向任意目录。包内 `MODEL_CARD.md` 记载出处、训练数据、held-out 指标与使用限制，`SHA256SUMS` 供逐文件校验；外层 zip 摘要 `9a63b3e80716a9e1c53aa55a146935a8de262bef16587dda1cad0521cab22f6d`。
 
 > 权重许可与上游约束见包内 `MODEL_CARD.md` 与 [LICENSES.md](LICENSES.md)；语料、决策样本、Mortal 代码均**不随仓库分发**。
 
@@ -121,7 +121,7 @@ python scripts/live_from_capture.py --jsonl frames.jsonl --follow
 | `advisor/` | 推荐服务与局面合成（`/v1/react`、手输模式的状态重建） |
 | `brain/` | state_text 序列化 + laya 序列构建（模型输入的唯一口径） |
 | `capture/` | CDP 帧捕获、liqi protobuf 解码、mjai 状态机（Akagi 移植改写） |
-| `engine/`、`environment/` | 牌谱重演、规则封装（riichienv） |
+| `engine/` | 牌谱重演、规则封装（riichienv）；环境定义见 `environment.yml` |
 | `eval/` | 竞技场：B0 随机 / B1 启发式 / B3 = LAYA 微调，席位轮换 + 95% CI |
 | `train/` | RLCD 蒸馏微调（软标签混合目标、单卡 8-bit） |
 | `data/` | 牌谱 → 决策点提取 |
@@ -133,7 +133,7 @@ python scripts/live_from_capture.py --jsonl frames.jsonl --follow
 2. 教师软标签蒸馏：`train/rlcd_sft.py`——human × teacher 混合目标、分歧层退火、鸣牌加权，单卡 8GB 可训；
 3. `eval/arena` 竞技场出数，同一发牌种子 + 席位轮换，结论附 95% CI。
 
-训练过程全记录在 `runs/`（`RunLog` 自动归档 config / env / metrics / summary）。语料与教师参照模型不随仓库分发（见下方致谢）。
+训练过程由 `brain/runlog.py` 的 `RunLog` 自动归档（config / env / metrics / summary，落在本地 `runs/`，**不随仓库分发**）。语料、决策样本与教师参照模型同样不随仓库分发（见下方致谢）。
 
 ## 致谢
 
@@ -151,7 +151,7 @@ python scripts/live_from_capture.py --jsonl frames.jsonl --follow
 
 ## 免责声明
 
-- **关于雀魂实时推荐**：这个功能只为方便验证、复现而做，**不是游戏外挂**；作者本人仅在友人场验证过，并没有拿它参加过真实对局。
+- **关于雀魂实时推荐**：这个功能只为方便验证、复现而做，**不是游戏外挂**：系统对客户端零写入、零注入，出牌永远由玩家自己点，也不提供任何代打能力。作者自用范围限于只读观察与个人复盘；只读截获本身仍受游戏服务条款约束，请自行评估风险。
 - 本项目**仅供学习参考，不建议真实拿来打游戏**；模型输出不构成任何建议，误操作后果自负。
 - 系统对游戏客户端**零写入、零注入**（只读捕获、只出建议）；但只读截获本身仍受游戏服务条款约束，使用风险自担。
 - 本仓库不含任何账号凭证、协议请求构造或自动化操作代码。

@@ -14,6 +14,7 @@ legal_actions + state_text 全等。等于用 env 自带的完整规则校验器
 """
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -26,7 +27,8 @@ from advisor.build_state import BoardSpec, Furo, build_events
 from brain.serialize import state_text
 from engine.replay import replay_decisions
 
-PARQUET = Path("D:/projects/mjbrain/data/raw/tenhou_houou_mjai/data/tenhou-00000.parquet")
+_ROOT = Path(__file__).parents[1]   # 仓库根：棋谱/权重按仓内相对位置找（环境变量可覆盖）
+PARQUET = Path(os.environ.get("MJBRAIN_PARQUET") or _ROOT / "data/raw/tenhou_houou_mjai/data/tenhou-00000.parquet")
 
 
 def norm_state(s: str) -> str:

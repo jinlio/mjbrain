@@ -4,14 +4,16 @@
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
 from advisor.server import _has_reach, _reach_declare_window, react
 
-CKPT = Path("D:/projects/mjbrain/checkpoints/20260921T184331Z-rlcd-gate")
-PARQUET = Path("D:/projects/mjbrain/data/raw/tenhou_houou_mjai/data/tenhou-00000.parquet")
+_ROOT = Path(__file__).parents[1]   # 仓库根：棋谱/权重按仓内相对位置找（环境变量可覆盖）
+CKPT = Path(os.environ.get("MJBRAIN_CKPT") or _ROOT / "checkpoints/20260921T184331Z-rlcd-gate")
+PARQUET = Path(os.environ.get("MJBRAIN_PARQUET") or _ROOT / "data/raw/tenhou_houou_mjai/data/tenhou-00000.parquet")
 
 # 合成立直局：庄家 111m222m333m45m99m + 摸 1z(E)。切 E 是唯一保听打牌（听 3m/6m），
 # 故主窗 15 项 = dahai×14 + 一个裸 reach，宣言窗只剩 dahai:E（riichienv 两段式：
