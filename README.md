@@ -80,8 +80,8 @@ curl -s -X POST http://127.0.0.1:8765/v1/react \
 ```bash
 # 0) 首次使用捕获层：编译 liqi 协议描述符（生成 capture/liqi/_gen/，不入库）
 python scripts/compile_liqi_proto.py
-# 1) CDP 只读订阅雀魂页面的 WebSocket 帧 → JSONL
-python scripts/run_capture.py --url <雀魂页面URL> --out frames.jsonl
+# 1) CDP 只读订阅雀魂页面的 WebSocket 帧 → JSONL（自动拉起独立 profile 浏览器窗口）
+python scripts/run_capture.py --url https://game.maj-soul.com/1/ --out frames.jsonl
 # 2) 尾随帧文件 → 解码为 mjai 事件流 → POST /v1/react → 打印实时推荐
 python scripts/live_from_capture.py --jsonl frames.jsonl --follow
 ```
