@@ -4,13 +4,10 @@
 随写随刷）——本窗**零网络、不碰 advisor 服务**（不与推理抢锁）、更不碰雀魂
 页面（红线：无注入）。每条新记录到达即刷新渲染。
 
-窗口联动（验收反馈，2026-09-24）：
-- **跟随浏览器**：run_capture 经 CDP 只读查询把浏览器窗口几何发布到
-  `~/.mjbrain/browser-bounds.json`；本窗每次 tick 读该文件，浏览器窗口移动
-  时整体平移、保持与它的相对位置（bounds 文件缺失/过期 5s 以上=不动作）。
-- **可单独拖动 + 记住位置**：左键拖拽照常；`hud.json` 同时存绝对位置和
-  "相对浏览器窗口左上角的偏移"，下次启动若浏览器活着则按偏移复原。
-- **锁定/解锁**：右键菜单切换（或按 L 键）。锁定=不可拖、不跟随，防误触。
+窗口行为：
+- **可拖动 + 记住位置**：左键按住整窗移动；`hud.json` 存绝对位置，下次启动复原。
+  （曾实现"跟随浏览器窗口移动"，2026-09-24 真机验收体验不佳，已移除。）
+- **锁定/解锁**：右键菜单切换（或按 L 键）。锁定=不可拖，防误触。
 
 形态与差异：
 - Windows/X11：overrideredirect 无边框 + -topmost 置顶 + -alpha 半透明。
@@ -29,7 +26,6 @@ import argparse
 import json
 import pathlib
 import sys
-import time
 
 DEFAULT_FONT_SIZE = 12
 DEFAULT_ALPHA = 0.85
@@ -73,46 +69,6 @@ def latest_record(lines: list[str]) -> dict | None:
         if isinstance(rec, dict):
             return rec
     return None
-
-
-# ---------- 窗口联动（纯函数，可单测） ----------
-
-def bounds_file() -> pathlib.Path:
-    return pathlib.Path.home() / ".mjbrain" / "browser-bounds.json"
-
-
-def read_bounds(path: pathlib.Path | None = None, max_age: float = 5.0,
-                now: float | None = None) -> dict | None:
-    """capture 发布的浏览器窗口几何；缺失/坏文件/太陈旧/离屏(最小化) → None。"""
-    p = path or bounds_file()
-    try:
-        rec = json.loads(p.read_text(encoding="utf-8"))
-        x, y = float(rec["x"]), float(rec["y"])
-        ts = float(rec["ts"])
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-    if (now if now is not None else time.time()) - ts > max_age:
-        return None
-    if abs(x) > 30000 or abs(y) > 30000:  # 最小化窗口会报 -32000 一类离屏坐标
-        return None
-    return {"x": int(x), "y": int(y)}
-
-
-def start_position(s: dict, bounds: dict | None) -> tuple[int, int]:
-    """启动定位：有新鲜 bounds 且存有相对偏移 → 按偏移贴回浏览器窗口。"""
-    if bounds is not None and "off_x" in s and "off_y" in s:
-        return bounds["x"] + int(s["off_x"]), bounds["y"] + int(s["off_y"])
-    return int(s["x"]), int(s["y"])
-
-
-def follow_shift(x: int, y: int, last: dict | None, cur: dict | None):
-    """浏览器窗口位移 → HUD 平移后的新绝对位置；无需移动/无从判断 → None。"""
-    if not last or not cur:
-        return None
-    dx, dy = cur["x"] - last["x"], cur["y"] - last["y"]
-    if dx == 0 and dy == 0:
-        return None
-    return x + dx, y + dy
 
 
 # ---------- 持久设置 ----------
@@ -161,7 +117,6 @@ class HudApp:
         }
         self.pos = 0
         self.shown = None  # 当前显示的文本（避免无变化重绘）
-        self._last_bounds = read_bounds()  # 浏览器窗口几何（follow 用），None=不动作
 
         self.root = tk.Tk()
         self.root.title("mjbrain HUD")
@@ -171,7 +126,6 @@ class HudApp:
         self._try_alpha(self.s["alpha"])
         self.root.attributes("-topmost", self.s["topmost"])
         self.root.configure(bg="#101418")
-        self.s["x"], self.s["y"] = start_position(self.s, self._last_bounds)
         self.root.geometry(f"+{self.s['x']}+{self.s['y']}")
 
         fam = {"win32": "Microsoft YaHei",
@@ -224,10 +178,6 @@ class HudApp:
             m.grab_release()
 
     def _save(self) -> None:
-        """持久化前刷新相对偏移（浏览器活着才有意义）。"""
-        if self._last_bounds:
-            self.s["off_x"] = self.s["x"] - self._last_bounds["x"]
-            self.s["off_y"] = self.s["y"] - self._last_bounds["y"]
         save_settings(self.s)
 
     def _toggle_lock(self) -> None:
@@ -272,18 +222,7 @@ class HudApp:
             if text != self.shown:
                 self.shown = text
                 self.label.configure(text=text)
-        self._follow()
         self.root.after(self.poll_ms, self.tick)
-
-    def _follow(self) -> None:
-        """浏览器窗口移动 → 整体平移保持相对静止；锁定或无新鲜 bounds 不动。"""
-        b = read_bounds()
-        if b is not None and not self.s["locked"]:
-            moved = follow_shift(self.s["x"], self.s["y"], self._last_bounds, b)
-            if moved:
-                self.s["x"], self.s["y"] = moved
-                self.root.geometry(f"+{self.s['x']}+{self.s['y']}")
-        self._last_bounds = b
 
     def run(self) -> int:
         self.tick()
