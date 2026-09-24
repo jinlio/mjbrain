@@ -19,8 +19,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from advisor import hints
 
-from advisor import hints
-
 _DEFAULT_CKPT = "checkpoints/20260921T184331Z-rlcd-gate"
 
 _adviser = None

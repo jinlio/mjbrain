@@ -111,6 +111,7 @@ def main() -> int:
 
     t0 = time.time()
     n = {"c": 0}
+    browser_alive = True  # attach 路径没有 proc 可查，别在窗口已关后谎报"保留运行"
     # 行缓冲：实时客户端（live_from_capture --follow）尾随读本文件，默认 8KB 块
     # 缓冲会让帧攒满一整块才落盘（实测滞后 5~96s），建议响应随之"极慢"
     with out.open("a", encoding="utf-8", buffering=1) as fh:
@@ -134,6 +135,7 @@ def main() -> int:
                 print(f"{n['c']} frames...", flush=True)
 
         async def run() -> None:
+            nonlocal browser_alive
             stop = asyncio.Event()
             w = cdp_client.CdpWatcher(ws_url, sink)
             task = asyncio.create_task(w.run(stop))
@@ -143,10 +145,12 @@ def main() -> int:
                     # attach 路径没有 proc 可查：浏览器窗口被关=CDP 连接先死，收工
                     exc = task.exception()
                     if exc is not None:
+                        browser_alive = False
                         print(f"CDP 连接断开（浏览器已关？）：{type(exc).__name__}: {exc}")
                     stop.set()
                     break
                 if proc is not None and proc.poll() is not None:
+                    browser_alive = False
                     print("浏览器进程退出，收工")
                     stop.set()
                     break
@@ -160,7 +164,7 @@ def main() -> int:
         except KeyboardInterrupt:
             pass
     print(f"total {n['c']} frames -> {out}")
-    if not args.headless and (proc is None or proc.poll() is None):
+    if not args.headless and browser_alive and (proc is None or proc.poll() is None):
         print("（浏览器保留运行中：只读截获已结束，对局不断线；下次运行自动续连）")
     return 0
 

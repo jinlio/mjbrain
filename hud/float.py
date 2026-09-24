@@ -11,8 +11,9 @@
   在 Aqua Tk 上支持有限，不支持时自动跳过。
 - 没有 Tk（conda 缺包）→ 明确报"装 tkinter"并退出，不静默。
 
-启动：python -m hud.float --advise data/raw/ms_frames/run1.jsonl.advise.jsonl
-（--wait 等文件出现；--no-topmost/--alpha/--geometry 临时覆盖持久设置）
+启动：python -m hud.float --advise data/raw/ms_frames/run1.advise.jsonl
+（--wait 等文件出现；--no-topmost/--alpha/--geometry 覆盖本次启动设置，
+窗口拖动或退出后仍会写入持久设置 ~/.mjbrain/hud.json）
 """
 
 from __future__ import annotations
@@ -176,17 +177,17 @@ class HudApp:
         self.root.destroy()
 
     def _read_new(self) -> dict | None:
-        """尾随 advise JSONL（行缓冲文件；截断/轮转时回卷重读）。"""
+        """尾随 advise JSONL（行缓冲文件；截断/轮转时回卷重读）。
+
+        文件暂缺（live 还没落盘、或 --wait 场景开局前）安静返回 None，
+        下个 tick 再试——main() 已对"不带 --wait 且文件不存在"fail-fast。
+        """
         try:
             with self.advise.open(encoding="utf-8") as fh:
                 fh.seek(self.pos)
                 chunk = fh.read()
                 self.pos = fh.tell()
-        except FileNotFoundError:
-            if not self.wait:
-                return None
-            return None
-        except OSError:
+        except OSError:  # FileNotFoundError 是子类：未出现/未就绪都走这
             return None
         if not chunk:
             try:
@@ -220,7 +221,8 @@ def main(argv=None) -> int:
                     help="文件暂未出现时不退出（live 起来后才落盘）")
     ap.add_argument("--poll", type=int, default=250, help="轮询毫秒")
     ap.add_argument("--alpha", type=float, default=None)
-    ap.add_argument("--geometry", default=None, help="临时位置 X,Y（不覆盖持久设置）")
+    ap.add_argument("--geometry", default=None,
+                    help="本次起始位置 X,Y（覆盖持久设置的初值；拖动/退出后照常持久化）")
     ap.add_argument("--no-topmost", action="store_true")
     args = ap.parse_args(argv)
 
@@ -229,7 +231,11 @@ def main(argv=None) -> int:
         s["alpha"] = args.alpha
     if args.geometry:
         x, _, y = args.geometry.partition(",")
-        s["x"], s["y"] = int(x), int(y)
+        try:
+            s["x"], s["y"] = int(x), int(y)
+        except ValueError:
+            print(f"--geometry 要 X,Y 整数（如 40,40）：{args.geometry!r}", file=sys.stderr)
+            return 2
     if args.no_topmost:
         s["topmost"] = False
     if not args.advise.exists() and not args.wait:
