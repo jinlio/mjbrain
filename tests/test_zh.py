@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
-from advisor.zh import action_zh, tile_zh
+from advisor.zh import action_zh, hint_zh, tile_zh
+
+
+def test_hint_zh_renders():
+    h = {"shanten": 1, "waits": ["5p"], "dora": ["1m", "E"],
+         "dora_in_hand": 2, "melded": False}
+    assert hint_zh(h) == "向听1 待[5饼] 宝[1万 东]×2"
+    # 副露降级（向听 None）+ 无待牌/宝牌计数
+    h2 = {"shanten": None, "waits": [], "dora": ["3s"], "dora_in_hand": 0,
+          "melded": True}
+    assert hint_zh(h2) == "向听- 宝[3索] 副露"
+    assert hint_zh(None) == ""
 
 
 def test_tile_numbered_and_honor():

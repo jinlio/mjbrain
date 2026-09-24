@@ -120,6 +120,20 @@ def test_fmt_decision_marks_own_seat():
     assert glue.fmt_decision({"seat": 2, "window": False}, 1) == "座位2: 无决策窗"
 
 
+def test_fmt_decision_appends_hint():
+    """hint 段：服务端附带时拼在行尾；无 hint（None/缺字段）不加竖线。"""
+    glue = _load_glue()
+    d = {"seat": 1, "legal_n": 3, "recommend": "dahai:5p",
+         "top": [{"a": "dahai:5p", "p": 0.5}],
+         "hint": {"shanten": 0, "waits": ["3m", "6m"], "dora": ["5p"],
+                  "dora_in_hand": 0, "melded": False}}
+    line = glue.fmt_decision(d, my_seat=1)
+    assert line.endswith("| 向听0 待[3万 6万] 宝[5饼]")
+    assert "候选3 → 切5饼" in line  # 竖线分隔，与 top 段并列
+    for no_hint in (dict(d, hint=None), {k: v for k, v in d.items() if k != "hint"}):
+        assert "向听" not in glue.fmt_decision(no_hint, my_seat=1)
+
+
 def test_fmt_reach_chinese():
     """立直宣言牌建议的显示行：mjai 串经 advisor.zh → 中文，取 top3。"""
     glue = _load_glue()

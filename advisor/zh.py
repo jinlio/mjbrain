@@ -28,6 +28,26 @@ def tile_zh(t: str) -> str:
     return _HONOR.get(t, t)
 
 
+def hint_zh(h: dict | None) -> str:
+    """确定性牌况提示（advisor.hints.hint_from_obs 的输出）→ 一行中文。
+
+    例：'向听0 待[3万 6万 9万] 宝[5饼]×2'；副露时向听显示 '-' 并标'副露'
+    （calculate_shanten 不收 melds，如实降级不造数）；无提示返回空串。
+    """
+    if not h:
+        return ""
+    parts = [f"向听{h['shanten']}" if h.get("shanten") is not None else "向听-"]
+    if h.get("waits"):
+        parts.append("待[" + " ".join(tile_zh(t) for t in h["waits"]) + "]")
+    if h.get("dora"):
+        n = h.get("dora_in_hand") or 0
+        parts.append("宝[" + " ".join(tile_zh(t) for t in h["dora"]) + "]"
+                     + (f"×{n}" if n else ""))
+    if h.get("melded"):
+        parts.append("副露")
+    return " ".join(parts)
+
+
 def action_zh(a: str) -> str:
     """mjai 动作串 → 中文：'dahai:5s'→'切5索'、'none'→'跳过'、'hora'→'和'。"""
     kind, _, pai = a.partition(":")

@@ -4,6 +4,8 @@
 - 只读语义：输入捕获层的事件流，输出建议 JSON；服务不存在任何"代替玩家
   发动作"的路径（零动作注入红线）。
 - 捕获侧（capture/）与训练/评估共用 brain.serialize 的同一 state_text。
+- 每个决策附带确定性牌况提示 hint（向听/待牌/宝牌，advisor.hints）——
+  加分项：算不出置 None，绝不影响推荐主链。
 
 启动：python -m advisor.server [--port 8765] [--ckpt DIR] [--device cpu]
 """
@@ -14,6 +16,10 @@ import argparse
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from advisor import hints
+
+from advisor import hints
 
 _DEFAULT_CKPT = "checkpoints/20260921T184331Z-rlcd-gate"
 
@@ -117,7 +123,8 @@ def react(events: list[dict], seat: int | None, ckpt: str,
         dec = {
             "seat": pid, "legal_n": len(legal),
             "recommend": ranked[0][0], "top": [{"a": a, "p": round(p, 4)}
-                                               for a, p in ranked]}
+                                               for a, p in ranked],
+            "hint": hints.hint_from_obs(ob)}  # None=提示不可得，不影响推荐
         if _has_reach(legal):  # 立直可选 → 附带"若立直，宣言牌切哪张"
             fw = _reach_declare_window(events, pid, adv, top)
             if fw is not None:

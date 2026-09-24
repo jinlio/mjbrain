@@ -12,8 +12,9 @@
 
 模型表现记录：每个成功响应追加一行到 `<输入名>.advise.jsonl`
 （`--log` 改路径、`--no-log` 关闭），行= {"ts","event_n","seat","rtt_s",
-"zh_recommend","zh_top","zh_reach","resp"}（zh_reach 仅立直可选窗有值：
-"若立直，宣言牌切哪张"的第二段建议），行缓冲随写随刷——事后与帧 JSONL
+"zh_recommend","zh_top","zh_reach","zh_hint","resp"}（zh_reach 仅立直可选窗有值：
+"若立直，宣言牌切哪张"的第二段建议；zh_hint=向听/待牌/宝牌一行中文，见
+advisor.hints），行缓冲随写随刷——事后与帧 JSONL
 （实际打法）对照即得"模型推荐 vs 实际出牌"逐窗记录；缺位审计=数
 window:true 的行。
 
@@ -73,8 +74,10 @@ def fmt_decision(d: dict, my_seat: int | None = None) -> str:
         return f"座位{d['seat']}{tag}: {d['error']}"
     top = "  ".join(f"{zh.action_zh(t['a'])} {t['p'] * 100:.1f}%"
                     for t in d.get("top", [])[:3])
-    return (f"[{time.strftime('%H:%M:%S')}] 座位{d['seat']}{tag} 候选{d['legal_n']}"
+    line = (f"[{time.strftime('%H:%M:%S')}] 座位{d['seat']}{tag} 候选{d['legal_n']}"
             f" → {zh.action_zh(d['recommend'])} | {top}")
+    hint = zh.hint_zh(d.get("hint"))
+    return f"{line} | {hint}" if hint else line
 
 
 def feed_lines(p, st, events: list[dict], lines) -> bool:
@@ -181,6 +184,7 @@ def main(argv=None) -> int:
                        "zh_recommend": None,
                        "zh_top": None,
                        "zh_reach": None,
+                       "zh_hint": None,
                        "resp": resp}
                 decs = [x for x in resp.get("decisions", []) if "recommend" in x]
                 picked = next((x for x in decs if x.get("seat") == body.get("seat")),
@@ -189,6 +193,7 @@ def main(argv=None) -> int:
                     rec["zh_recommend"] = zh.action_zh(picked["recommend"])
                     rec["zh_top"] = [[zh.action_zh(t["a"]), t["p"]]
                                      for t in picked.get("top", [])]
+                    rec["zh_hint"] = zh.hint_zh(picked.get("hint")) or None
                     rw = picked.get("reach")
                     if rw:
                         rec["zh_reach"] = {
@@ -209,9 +214,12 @@ def main(argv=None) -> int:
                 if "error" in d:
                     print(f"座位{seat_d}: {d['error']}", file=sys.stderr)
                     continue
+                h = d.get("hint") or {}
                 sig = (d.get("recommend"), d.get("legal_n"),
                        tuple(t["a"] for t in d.get("top", [])),
-                       (d.get("reach") or {}).get("recommend"))
+                       (d.get("reach") or {}).get("recommend"),
+                       (h.get("shanten"), tuple(h.get("waits") or []),
+                        tuple(h.get("dora") or [])))
                 if LAST.get(seat_d) == sig:  # 同一决策窗的重复回应不刷屏
                     continue
                 LAST[seat_d] = sig
