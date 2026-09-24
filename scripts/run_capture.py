@@ -28,6 +28,35 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from capture.chromium import cdp_client, launch
 
+DEFAULT_WINDOW_SIZE = "1600x900"  # 16:9，雀魂画布按窗口等比缩放，基本无黑边
+
+
+def _parse_size(s: str) -> tuple[int, int] | None:
+    """'1600x900'（或 1600,900）-> (w,h)；空串=不指定交给浏览器。"""
+    s = s.strip().lower().replace("x", ",")
+    if not s:
+        return None
+    a, _, b = s.partition(",")
+    try:
+        w, h = int(a), int(b)
+    except ValueError:
+        raise SystemExit(f"--window-size 不合法: {s!r}（要 WxH，如 1600x900）")
+    if not (200 <= w <= 7680 and 200 <= h <= 4320):
+        raise SystemExit(f"--window-size 超出合理范围: {s!r}")
+    return w, h
+
+
+def _parse_pos(s: str) -> tuple[int, int] | None:
+    """'80,60' -> (x,y)；空串=不指定。"""
+    s = s.strip().replace("x", ",")
+    if not s:
+        return None
+    a, _, b = s.partition(",")
+    try:
+        return int(a), int(b)
+    except ValueError:
+        raise SystemExit(f"--window-position 不合法: {s!r}（要 X,Y，如 80,60）")
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
@@ -38,7 +67,17 @@ def main() -> int:
                          "登录态跨运行保留；传一次性路径则不共享）")
     ap.add_argument("--headless", action="store_true", help="无头（自测用；雀魂正式用有头）")
     ap.add_argument("--seconds", type=float, default=0, help="0=一直跑")
+    ap.add_argument("--window-size", default=DEFAULT_WINDOW_SIZE,
+                    help=f"浏览器窗口 WxH（默认 {DEFAULT_WINDOW_SIZE}=16:9，"
+                         "贴齐游戏画布比例；传空串用浏览器默认）")
+    ap.add_argument("--window-position", default="",
+                    help="窗口左上角 X,Y（缺省交给系统）")
+    ap.add_argument("--no-app", action="store_true",
+                    help="普通标签页模式（缺省用 --app 独立窗：无标签栏/地址栏）")
     args = ap.parse_args()
+
+    win_size = _parse_size(args.window_size)
+    win_pos = _parse_pos(args.window_position)
 
     out = pathlib.Path(args.out or tempfile.mkdtemp(prefix="ms_frames_"))
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -57,8 +96,10 @@ def main() -> int:
         # 我们总是显式传端口，直接 GET /json/version 即可（headless=new 不写
         # DevToolsActivePort 文件，read_devtools_port 只留给 --remote-debugging-port=0 场景）
         try:
-            proc, udd, port = launch.spawn_browser(args.url, user_data_dir=udd,
-                                                   extra_args=extra)
+            proc, udd, port = launch.spawn_browser(
+                args.url, user_data_dir=udd, extra_args=extra,
+                window_size=win_size, window_position=win_pos,
+                app=not args.no_app and not args.headless)
             print(f"browser pid={proc.pid} port={port}")
             ws_url = launch.browser_ws_url(port)
         except TimeoutError as e:

@@ -73,6 +73,74 @@ def test_try_attach_live_instance(tmp_path, fake_cdp_endpoint):
     assert launch.try_attach(tmp_path) == "ws://127.0.0.1:1/devtools/browser/fake"
 
 
+def test_spawn_browser_geometry(tmp_path, monkeypatch):
+    seen: dict = {}
+
+    class FakePopen:
+        pid = 1
+
+        def __init__(self, cmd, **kw):
+            seen["cmd"] = [str(c) for c in cmd]
+
+    monkeypatch.setattr(launch.subprocess, "Popen", FakePopen)
+    url = "https://game.maj-soul.com/1/"
+    launch.spawn_browser(url, user_data_dir=tmp_path / "p", exe=pathlib.Path("chrome"),
+                         window_size=(1600, 900), window_position=(80, 60), app=True)
+    cmd = seen["cmd"]
+    assert "--window-size=1600,900" in cmd
+    assert "--window-position=80,60" in cmd
+    assert cmd[-1] == f"--app={url}"  # app 模式：URL 挂在 --app= 上，不出裸参
+
+
+def test_spawn_browser_no_geometry_flags_by_default(tmp_path, monkeypatch):
+    seen: dict = {}
+
+    class FakePopen:
+        pid = 1
+
+        def __init__(self, cmd, **kw):
+            seen["cmd"] = [str(c) for c in cmd]
+
+    monkeypatch.setattr(launch.subprocess, "Popen", FakePopen)
+    launch.spawn_browser("http://x/", user_data_dir=tmp_path / "p", exe=pathlib.Path("chrome"))
+    assert not any(c.startswith(("--window-size", "--window-position", "--app"))
+                   for c in seen["cmd"])
+
+
+def _load_run_capture():
+    import importlib.util
+
+    path = pathlib.Path(__file__).parents[1] / "scripts" / "run_capture.py"
+    spec = importlib.util.spec_from_file_location("run_capture", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("s,want", [
+    ("1600x900", (1600, 900)), ("1600,900", (1600, 900)), ("1280X720", (1280, 720)),
+    ("", None), ("   ", None),
+])
+def test_parse_size_ok(s, want):
+    assert _load_run_capture()._parse_size(s) == want
+
+
+@pytest.mark.parametrize("s", ["abc", "1600", "1600x", "100x100", "99999x900"])
+def test_parse_size_rejects(s):
+    with pytest.raises(SystemExit):
+        _load_run_capture()._parse_size(s)
+
+
+@pytest.mark.parametrize("s,want", [("80,60", (80, 60)), ("", None)])
+def test_parse_pos_ok(s, want):
+    assert _load_run_capture()._parse_pos(s) == want
+
+
+def test_parse_pos_rejects():
+    with pytest.raises(SystemExit):
+        _load_run_capture()._parse_pos("a,b")
+
+
 def test_spawn_browser_cmd_shape(tmp_path, monkeypatch):
     seen: dict = {}
 

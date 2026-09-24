@@ -89,11 +89,17 @@ def spawn_browser(
     exe: pathlib.Path | None = None,
     port: int | None = None,
     extra_args: list[str] | None = None,
+    window_size: tuple[int, int] | None = None,
+    window_position: tuple[int, int] | None = None,
+    app: bool = False,
 ) -> tuple[subprocess.Popen, pathlib.Path, int]:
     """拉起带 CDP 的浏览器进程。返回 (proc, profile_dir, debug_port)。
 
     独立 user-data-dir 是关键：不碰用户主 profile，且"杀遗留实例"
     （reclaim）可按该目录精确匹配（Akagi Windows 方案）。
+
+    window_size=(w,h) -> --window-size；app=True 用 --app=<url> 独立窗
+    （无标签栏/地址栏，客户区即页面，游戏画布比例=窗口比例）。
     """
     exe = exe or find_browser()
     udd = pathlib.Path(user_data_dir)
@@ -104,9 +110,13 @@ def spawn_browser(
         f"--user-data-dir={udd}",
         f"--remote-debugging-port={port}",
         *BASE_ARGS,
-        *(extra_args or []),
-        url,
     ]
+    if window_size:
+        cmd.append(f"--window-size={window_size[0]},{window_size[1]}")
+    if window_position:
+        cmd.append(f"--window-position={window_position[0]},{window_position[1]}")
+    cmd += list(extra_args or [])
+    cmd.append(f"--app={url}" if app else url)
     proc = subprocess.Popen(cmd)
     return proc, udd, port
 
