@@ -112,7 +112,7 @@ def _shanten_and_waits(hand, melds, melded, disc_types):
             try:
                 if HandEvaluator(hand, melds).is_tenpai():
                     tenpai_13s.append(hand)
-            except Exception:  # noqa: BLE001 —— 牌数形状不对就省，不连坐宝牌
+            except BaseException:  # noqa: BLE001 —— 牌数形状不对就省，不连坐宝牌
                 pass
 
     waits_t: set[int] = set()
@@ -127,11 +127,13 @@ def hint_from_obs(ob) -> dict | None:
     """决策窗 Observation -> {"shanten","waits","dora","dora_in_hand","melded"}。
 
     waits/dora 为中文可渲染的 mjai 牌名（advisor.zh.tile_zh 直吃）。
-    任何意外 → None，调用方按缺省显示。
+    任何意外 → None，调用方按缺省显示。必须接 BaseException：Rust 侧对
+    非法牌面（如雀魂流里 "?" 遮蔽座被 RiichiEnv 静默解析成全 1m）抛的
+    PanicException 不是 Exception 子类，漏接会掀翻请求线程。
     """
     try:
         return _hint(ob)
-    except Exception:  # noqa: BLE001 —— 加分项绝不让推荐链路崩
+    except BaseException:  # noqa: BLE001 —— 加分项绝不让推荐链路崩（含 Rust panic）
         return None
 
 
@@ -147,7 +149,7 @@ def _hint(ob) -> dict:
     waits_t: set[int] = set()
     try:
         shanten, waits_t = _shanten_and_waits(hand, melds, melded, disc_types)
-    except Exception:  # noqa: BLE001 —— 向听/待牌拿不到只丢这两项，宝牌照出
+    except BaseException:  # noqa: BLE001 —— 向听/待牌拿不到只丢这两项，宝牌照出
         shanten, waits_t = None, set()
 
     doras_t = sorted({_dora_of(int(i) // 4) for i in ob.dora_indicators})
