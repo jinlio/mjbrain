@@ -54,6 +54,34 @@ def free_port() -> int:
         return int(s.getsockname()[1])
 
 
+def default_user_data_dir() -> pathlib.Path:
+    """默认持久 profile：登录态跨运行/跨重启保留（雀魂 cookie 落在这里）。
+    刻意不提供"自动清理"路径——删这个目录等于丢登录，只能人工决定。"""
+    return pathlib.Path.home() / ".mjbrain" / "browser-profile"
+
+
+def try_attach(profile: pathlib.Path) -> str | None:
+    """该 profile 的浏览器若已在运行（上次 Ctrl-C 特意保留），返回其 CDP ws 地址。
+
+    只读发现：读 profile/DevToolsActivePort 的端口 + GET /json/version 探活；
+    不发任何 Input.*/Fetch.* 指令。任何一步失败都安静返回 None → 调用方走 spawn。
+    前提：有头 Chrome 带 --remote-debugging-port 启动时会写该文件；headless=new
+    不写（run_capture 的自测分支），attach 自然拿不到。
+    """
+    try:
+        line = (profile / "DevToolsActivePort").read_text(encoding="utf-8")
+        port = int(line.splitlines()[0].strip())
+    except (OSError, ValueError, IndexError):
+        return None
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/json/version", timeout=1.5
+        ) as r:
+            return json.load(r)["webSocketDebuggerUrl"]
+    except Exception:  # noqa: BLE001 —— 端口死了/文件是陈旧残留都算"没在运行"
+        return None
+
+
 def spawn_browser(
     url: str,
     *,
