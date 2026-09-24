@@ -5,8 +5,9 @@
 不上送 Browser::event_listener；我们手搓协议层可自验——统一走
 Target.attachToTarget(flatten=True) 后事件带 sessionId，按 session 分发。
 
-**只读**：仅 Network.enable / getResponseBody 一类观察命令；
-无 Input.*、无 Fetch.*、不构造任何发往页面的请求。
+**只读**：仅 Network.enable / getResponseBody 观察命令与
+Browser.getWindowForTarget/getWindowBounds 几何查询；无 Input.*、无
+Fetch.*、不构造任何发往页面的请求、不改窗口任何东西。
 """
 
 from __future__ import annotations
@@ -15,6 +16,9 @@ import asyncio
 import base64
 import json
 import logging
+import os
+import pathlib
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -36,10 +40,14 @@ class PageRef:
 class CdpWatcher:
     """附着 browser 端点，轮询页面集合 diff，每页 Network.enable 并转发 WS 帧。"""
 
-    def __init__(self, browser_ws_url: str, sink: FrameSink, poll: float = 1.0):
+    def __init__(self, browser_ws_url: str, sink: FrameSink, poll: float = 1.0,
+                 bounds_path: str | os.PathLike | None = None):
+        """bounds_path 非空时，每次轮询把首个 page 窗口的几何写入该 JSON 文件
+        （原子替换），供 HUD 悬浮窗跟随浏览器移动。纯观察，不干预窗口。"""
         self._url = browser_ws_url
         self._sink = sink
         self._poll = poll
+        self._bounds_path = pathlib.Path(bounds_path) if bounds_path else None
         self._ws: websockets.ClientConnection | None = None
         self._next_id = 0
         self._pending: dict[int, asyncio.Future] = {}
@@ -65,10 +73,36 @@ class CdpWatcher:
         try:
             while not (stop and stop.is_set()):
                 await self._diff_pages()
+                if self._bounds_path is not None:
+                    try:
+                        await self._publish_bounds()
+                    except Exception:  # noqa: BLE001 —— 几何发布失败不影响截帧
+                        log.debug("publish bounds failed", exc_info=True)
                 await asyncio.sleep(self._poll)
         finally:
             reader.cancel()
             await self._ws.close()
+
+    async def _publish_bounds(self) -> None:
+        """查询首个 page 所在窗口的位置尺寸，原子写入 bounds_path。
+        多窗时取第一个 attach 的 page（app 模式本就单窗）。"""
+        assert self._bounds_path is not None
+        page = next(iter(self._pages.values()), None)
+        if page is None:
+            return
+        w = await self._send("Browser.getWindowForTarget",
+                             {"targetId": page.target_id})
+        r = await self._send("Browser.getWindowBounds",
+                             {"windowId": w["windowId"]})
+        b = r.get("bounds", {})
+        if "left" not in b or "top" not in b:
+            return
+        rec = {"x": b["left"], "y": b["top"], "w": b.get("width", 0),
+               "h": b.get("height", 0), "url": page.url[:160], "ts": time.time()}
+        tmp = self._bounds_path.with_name(self._bounds_path.name + ".tmp")
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(rec), encoding="utf-8")
+        os.replace(tmp, self._bounds_path)
 
     async def _diff_pages(self) -> None:
         assert self._ws is not None

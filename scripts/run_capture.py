@@ -137,7 +137,10 @@ def main() -> int:
         async def run() -> None:
             nonlocal browser_alive
             stop = asyncio.Event()
-            w = cdp_client.CdpWatcher(ws_url, sink)
+            # 有头模式发布窗口几何（~/.mjbrain/browser-bounds.json）供 HUD 跟随；
+            # headless 自测无需。查询失败静默，截帧链路零影响。
+            bp = None if args.headless else udd.parent / "browser-bounds.json"
+            w = cdp_client.CdpWatcher(ws_url, sink, bounds_path=bp)
             task = asyncio.create_task(w.run(stop))
             while not stop.is_set():
                 await asyncio.sleep(0.2)

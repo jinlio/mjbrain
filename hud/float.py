@@ -4,9 +4,16 @@
 随写随刷）——本窗**零网络、不碰 advisor 服务**（不与推理抢锁）、更不碰雀魂
 页面（红线：无注入）。每条新记录到达即刷新渲染。
 
+窗口联动（验收反馈，2026-09-24）：
+- **跟随浏览器**：run_capture 经 CDP 只读查询把浏览器窗口几何发布到
+  `~/.mjbrain/browser-bounds.json`；本窗每次 tick 读该文件，浏览器窗口移动
+  时整体平移、保持与它的相对位置（bounds 文件缺失/过期 5s 以上=不动作）。
+- **可单独拖动 + 记住位置**：左键拖拽照常；`hud.json` 同时存绝对位置和
+  "相对浏览器窗口左上角的偏移"，下次启动若浏览器活着则按偏移复原。
+- **锁定/解锁**：右键菜单切换（或按 L 键）。锁定=不可拖、不跟随，防误触。
+
 形态与差异：
-- Windows/X11：overrideredirect 无边框 + -topmost 置顶 + -alpha 半透明，
-  鼠标左键按住可拖动，位置/透明度落盘 `~/.mjbrain/hud.json`。
+- Windows/X11：overrideredirect 无边框 + -topmost 置顶 + -alpha 半透明。
 - macOS：overrideredirect 不可靠 → 降级为带标题栏小窗（仍置顶）；alpha
   在 Aqua Tk 上支持有限，不支持时自动跳过。
 - 没有 Tk（conda 缺包）→ 明确报"装 tkinter"并退出，不静默。
@@ -68,6 +75,46 @@ def latest_record(lines: list[str]) -> dict | None:
     return None
 
 
+# ---------- 窗口联动（纯函数，可单测） ----------
+
+def bounds_file() -> pathlib.Path:
+    return pathlib.Path.home() / ".mjbrain" / "browser-bounds.json"
+
+
+def read_bounds(path: pathlib.Path | None = None, max_age: float = 5.0,
+                now: float | None = None) -> dict | None:
+    """capture 发布的浏览器窗口几何；缺失/坏文件/太陈旧/离屏(最小化) → None。"""
+    p = path or bounds_file()
+    try:
+        rec = json.loads(p.read_text(encoding="utf-8"))
+        x, y = float(rec["x"]), float(rec["y"])
+        ts = float(rec["ts"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if (now if now is not None else time.time()) - ts > max_age:
+        return None
+    if abs(x) > 30000 or abs(y) > 30000:  # 最小化窗口会报 -32000 一类离屏坐标
+        return None
+    return {"x": int(x), "y": int(y)}
+
+
+def start_position(s: dict, bounds: dict | None) -> tuple[int, int]:
+    """启动定位：有新鲜 bounds 且存有相对偏移 → 按偏移贴回浏览器窗口。"""
+    if bounds is not None and "off_x" in s and "off_y" in s:
+        return bounds["x"] + int(s["off_x"]), bounds["y"] + int(s["off_y"])
+    return int(s["x"]), int(s["y"])
+
+
+def follow_shift(x: int, y: int, last: dict | None, cur: dict | None):
+    """浏览器窗口位移 → HUD 平移后的新绝对位置；无需移动/无从判断 → None。"""
+    if not last or not cur:
+        return None
+    dx, dy = cur["x"] - last["x"], cur["y"] - last["y"]
+    if dx == 0 and dy == 0:
+        return None
+    return x + dx, y + dy
+
+
 # ---------- 持久设置 ----------
 
 def settings_path() -> pathlib.Path:
@@ -110,9 +157,11 @@ class HudApp:
             "alpha": float(settings.get("alpha", DEFAULT_ALPHA)),
             "font": int(settings.get("font", DEFAULT_FONT_SIZE)),
             "topmost": bool(settings.get("topmost", True)),
+            "locked": bool(settings.get("locked", False)),
         }
         self.pos = 0
         self.shown = None  # 当前显示的文本（避免无变化重绘）
+        self._last_bounds = read_bounds()  # 浏览器窗口几何（follow 用），None=不动作
 
         self.root = tk.Tk()
         self.root.title("mjbrain HUD")
@@ -122,6 +171,7 @@ class HudApp:
         self._try_alpha(self.s["alpha"])
         self.root.attributes("-topmost", self.s["topmost"])
         self.root.configure(bg="#101418")
+        self.s["x"], self.s["y"] = start_position(self.s, self._last_bounds)
         self.root.geometry(f"+{self.s['x']}+{self.s['y']}")
 
         fam = {"win32": "Microsoft YaHei",
@@ -131,13 +181,14 @@ class HudApp:
                               font=(fam, self.s["font"]))
         self.label.pack(padx=10, pady=6)
 
-        # 拖动：无边框窗没有标题栏，左键按住整窗移动
+        # 拖动：无边框窗没有标题栏，左键按住整窗移动（锁定时忽略）
         self._drag = None
         for w in (self.root, self.label):
             w.bind("<Button-1>", self._drag_start)
             w.bind("<B1-Motion>", self._drag_move)
-            w.bind("<Button-3>", self._menu)       # 右键：钉住/退出
+            w.bind("<Button-3>", self._menu)       # 右键：锁定/置顶/退出
             w.bind("<Escape>", lambda e: self.stop())
+            w.bind("l", lambda e: self._toggle_lock())  # L 快捷切换锁定
 
     def _try_alpha(self, a: float) -> None:
         try:
@@ -146,10 +197,12 @@ class HudApp:
             pass
 
     def _drag_start(self, ev) -> None:
+        if self.s["locked"]:
+            return
         self._drag = (ev.x_root - self.s["x"], ev.y_root - self.s["y"])
 
     def _drag_move(self, ev) -> None:
-        if not self._drag:
+        if not self._drag or self.s["locked"]:
             return
         self.s["x"], self.s["y"] = ev.x_root - self._drag[0], ev.y_root - self._drag[1]
         self.root.geometry(f"+{self.s['x']}+{self.s['y']}")
@@ -159,6 +212,9 @@ class HudApp:
 
         m = tk.Menu(self.root, tearoff=0)
         m.add_command(
+            label="解锁位置 (L)" if self.s["locked"] else "锁定位置 (L)",
+            command=self._toggle_lock)
+        m.add_command(
             label="钉住置顶" if not self.s["topmost"] else "取消置顶",
             command=self._toggle_top)
         m.add_command(label="退出 (Esc)", command=self.stop)
@@ -167,13 +223,24 @@ class HudApp:
         finally:
             m.grab_release()
 
+    def _save(self) -> None:
+        """持久化前刷新相对偏移（浏览器活着才有意义）。"""
+        if self._last_bounds:
+            self.s["off_x"] = self.s["x"] - self._last_bounds["x"]
+            self.s["off_y"] = self.s["y"] - self._last_bounds["y"]
+        save_settings(self.s)
+
+    def _toggle_lock(self) -> None:
+        self.s["locked"] = not self.s["locked"]
+        self._save()
+
     def _toggle_top(self) -> None:
         self.s["topmost"] = not self.s["topmost"]
         self.root.attributes("-topmost", self.s["topmost"])
-        save_settings(self.s)
+        self._save()
 
     def stop(self) -> None:
-        save_settings(self.s)
+        self._save()
         self.root.destroy()
 
     def _read_new(self) -> dict | None:
@@ -205,7 +272,18 @@ class HudApp:
             if text != self.shown:
                 self.shown = text
                 self.label.configure(text=text)
+        self._follow()
         self.root.after(self.poll_ms, self.tick)
+
+    def _follow(self) -> None:
+        """浏览器窗口移动 → 整体平移保持相对静止；锁定或无新鲜 bounds 不动。"""
+        b = read_bounds()
+        if b is not None and not self.s["locked"]:
+            moved = follow_shift(self.s["x"], self.s["y"], self._last_bounds, b)
+            if moved:
+                self.s["x"], self.s["y"] = moved
+                self.root.geometry(f"+{self.s['x']}+{self.s['y']}")
+        self._last_bounds = b
 
     def run(self) -> int:
         self.tick()

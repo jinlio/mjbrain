@@ -53,3 +53,49 @@ def test_settings_roundtrip(tmp_path, monkeypatch):
     # 坏文件 → 空设置而非崩
     hud.settings_path().write_text("{broken", encoding="utf-8")
     assert hud.load_settings() == {}
+
+
+# ---------- 窗口联动（跟随/相对位置/新鲜度） ----------
+
+def _write_bounds(p, x, y, ts, w=1600, h=900):
+    p.write_text(json.dumps({"x": x, "y": y, "w": w, "h": h,
+                             "url": "game", "ts": ts}), encoding="utf-8")
+
+
+def test_read_bounds_fresh_and_stale(tmp_path):
+    bp = tmp_path / "browser-bounds.json"
+    now = 1000.0
+    _write_bounds(bp, 40, 60, now)
+    assert hud.read_bounds(bp, max_age=5.0, now=now + 4) == {"x": 40, "y": 60}
+    assert hud.read_bounds(bp, max_age=5.0, now=now + 6) is None   # 过期
+
+
+def test_read_bounds_bad_inputs(tmp_path):
+    bp = tmp_path / "b.json"
+    assert hud.read_bounds(bp, now=0) is None                       # 不存在
+    bp.write_text("{trunc", encoding="utf-8")
+    assert hud.read_bounds(bp, now=0) is None                       # 坏 JSON
+    _write_bounds(bp, 40, 60, 100.0)
+    assert hud.read_bounds(bp, max_age=5.0, now=1000.0) is None     # ts 太老
+    _write_bounds(bp, -32000, -32000, 0.0)                          # 最小化离屏
+    assert hud.read_bounds(bp, max_age=9999, now=1) is None
+
+
+def test_start_position_with_and_without_offset():
+    s = {"x": 500, "y": 500, "off_x": 100, "off_y": -40}
+    b = {"x": 250, "y": 160}
+    assert hud.start_position(s, b) == (350, 120)      # 贴回浏览器窗口
+    assert hud.start_position(s, None) == (500, 500)   # 浏览器不在→绝对位置
+    assert hud.start_position({"x": 7, "y": 9}, b) == (7, 9)  # 没存过偏移
+
+
+def test_follow_shift():
+    assert hud.follow_shift(10, 10, {"x": 0, "y": 0}, {"x": 30, "y": -20}) == (40, -10)
+    assert hud.follow_shift(10, 10, {"x": 0, "y": 0}, {"x": 0, "y": 0}) is None  # 没动
+    assert hud.follow_shift(10, 10, None, {"x": 5, "y": 5}) is None              # 首次见
+    assert hud.follow_shift(10, 10, {"x": 5, "y": 5}, None) is None              # 浏览器关了
+
+
+def test_bounds_file_under_mjbrain_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+    assert hud.bounds_file() == tmp_path / ".mjbrain" / "browser-bounds.json"
