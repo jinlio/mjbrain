@@ -12,7 +12,8 @@ Jev 本身不开源、无法定制，于是这次尝试基于开源的 LAYA 做�
 
 - **只推荐，不自动**：零动作注入，不发出牌请求、不修改游戏状态，出牌永远由你自己按。实时数据走 web CDP 只读订阅 WebSocket 帧（无证书、无系统代理）。
 - **档 0 · 手输局面**：CLI 输入当前局面（手牌/副露/牌河/宝牌），立即给出推荐动作 + 候选概率分布 + 向听/听牌标注，牌桌间隙查一手。
-- **档 1 · 本地推荐服务**：`/v1/react` HTTP 服务接收 mjai 事件流，返回微调模型的推荐与候选分布；配套捕获管道（CDP → liqi 协议解码 → mjai 状态机 → 服务）可接入实时对局，也可离线重演棋谱。立直可选时会多给一段「若立直，宣言牌切哪张」的建议（对宣言牌窗再判一次）；`scripts/compare_advise.py` 可把推荐记录与实际打法逐窗对照（作者自用样本 90 窗：top-1 一致 89 次，实际打法 100% 落在 top-3 内）。
+- **档 1 · 本地推荐服务**：`/v1/react` HTTP 服务接收 mjai 事件流，返回微调模型的推荐与候选分布；配套捕获管道（CDP → liqi 协议解码 → mjai 状态机 → 服务）可接入实时对局，也可离线重演棋谱。立直可选时会多给一段「若立直，宣言牌切哪张」的建议（对宣言牌窗再判一次）；每个决策同时附带**确定性牌况提示**——向听数、待牌、宝牌（含手里几张），由规则引擎算出，与模型无关、永远可解释（副露时向听如实显示 `-`，待牌照给）；`scripts/compare_advise.py` 可把推荐记录与实际打法逐窗对照（作者自用样本 90 窗：top-1 一致 89 次，实际打法 100% 落在 top-3 内）。
+- **悬浮 HUD**：`hud/float.py` 一个 OS 级置顶小窗浮在游戏窗口之上（不注入页面、不占布局），尾随推荐记录实时刷新：推荐动作 + 候选概率 + 向听/待牌/宝牌。`run_demo` 一键链里自带。
 - **模型管模糊判断，代码管精确规则**：合法动作集、向听、点数全部由确定性代码生成，模型只在合法子集上做带概率的选择，不会打出手牌里没有的牌。
 - **完整训练管线**：牌谱重演 → 决策点提取 → 教师软标签蒸馏（RLCD 风格，human × teacher 混合目标）→ 单卡微调（8-bit 优化器 + 梯度检查点，8GB 显存可训）；配套竞技场评测框架（同一发牌种子、席位轮换、按种子聚类 95% CI）。
 
@@ -96,15 +97,23 @@ curl -s -X POST http://127.0.0.1:8765/v1/react \
 ```bash
 # 0) 首次使用捕获层：编译 liqi 协议描述符（生成 capture/liqi/_gen/，不入库）
 python scripts/compile_liqi_proto.py
-# 1) CDP 只读订阅雀魂页面的 WebSocket 帧 → JSONL（自动拉起独立 profile 浏览器窗口）
+# 1) CDP 只读订阅雀魂页面的 WebSocket 帧 → JSONL
+#    缺省自动拉起 1600x900（16:9）--app 独立窗（无标签栏/地址栏），窗口已开着则直接续连；
+#    profile 缺省为持久目录 ~/.mjbrain/browser-profile——登录一次，之后一直保留
 python scripts/run_capture.py --url https://game.maj-soul.com/1/ --out frames.jsonl
-# 2) 尾随帧文件 → 解码为 mjai 事件流 → POST /v1/react → 打印实时推荐
+#    （--window-size/--window-position/--no-app 可覆盖；--profile 可指定别的路径）
+# 2) 尾随帧文件 → 解码为 mjai 事件流 → POST /v1/react → 打印实时推荐（含向听/待牌/宝牌）
 #    每个决策窗的推荐同时落盘 frames.advise.jsonl（与帧文件对照即可复盘模型表现）
 python scripts/live_from_capture.py --jsonl frames.jsonl --follow
+# 3) （可选）悬浮 HUD：尾随该推荐记录的置顶小窗
+python -m hud.float --advise frames.advise.jsonl --wait
 ```
 
-> 懒人版：双击仓库根目录 `run_demo.bat` 一键开三个窗口（服务 / 捕获 / 推荐），
-> 帧文件自动按局定名（`run1.jsonl`、`run2.jsonl`…），权重自动找 `checkpoints/` 下的解压位置。
+> 懒人版（Windows 双击 `run_demo.bat`，Mac/Linux 跑 `python scripts/run_demo.py`）：
+> 一条命令起齐服务 / 捕获 / 实时推荐 / HUD 四件套，子进程输出统一加前缀转印；
+> 帧文件按局自动轮转（`run1.jsonl`、`run2.jsonl`…），权重按 `checkpoints/` 下的
+> 常见位置自动找。`--dry` 只预检不拉起。Ctrl-C 收工时**浏览器保留**（对局不断线，
+> 下次运行自动续连），设备自动选 MPS/CUDA/CPU。
 
 ## 架构
 
@@ -112,20 +121,22 @@ python scripts/live_from_capture.py --jsonl frames.jsonl --follow
 游戏流量 → capture（CDP → liqi 协议解码 → mjai 事件状态机，只读）
         → engine（规则重演 + 合法动作集/向听/点数，确定性代码）
         → brain（文本快照序列化，≤512 token 窗口）
-        → advisor（LAYA 微调权重前向 + 分桶温度 → /v1/react 推荐）
+        → advisor（LAYA 微调权重前向 + 分桶温度 → /v1/react 推荐 + 向听/待牌/宝牌 hint）
+        → 终端 + *.advise.jsonl → hud（OS 悬浮窗，尾随记录，不注入页面）
 超时兜底 = 启发式 B1（和牌/立直优先 + 现物防守 + 最小向听）
 ```
 
 | 目录 | 职责 |
 |---|---|
-| `advisor/` | 推荐服务与局面合成（`/v1/react`、手输模式的状态重建） |
+| `advisor/` | 推荐服务与局面合成（`/v1/react`、手输模式的状态重建、hint=向听/待牌/宝牌） |
+| `hud/` | OS 悬浮建议窗（Tkinter，尾随 `*.advise.jsonl`；不注入页面） |
 | `brain/` | state_text 序列化 + laya 序列构建（模型输入的唯一口径） |
 | `capture/` | CDP 帧捕获、liqi protobuf 解码、mjai 状态机（Akagi 移植改写） |
 | `engine/` | 牌谱重演、规则封装（riichienv）；环境定义见 `environment.yml` |
 | `eval/` | 竞技场：B0 随机 / B1 启发式 / B3 = LAYA 微调，席位轮换 + 95% CI |
 | `train/` | RLCD 蒸馏微调（软标签混合目标、单卡 8-bit） |
 | `data/` | 牌谱 → 决策点提取 |
-| `scripts/` | 入口脚本：帧捕获、棋谱重演、档 0 / 实时推荐、权重打包、环境自检 |
+| `scripts/` | 入口脚本：一键起 demo（`run_demo.py` 跨平台）、帧捕获、棋谱重演、档 0 / 实时推荐、权重打包、环境自检 |
 | `reference/` | Akagi v3 上游源码快照（仅作移植对照，Apache-2.0，归属见 [LICENSES.md](LICENSES.md)） |
 | `tests/` | 全链路测试：真棋谱往返、帧解码金标、服务契约 |
 
