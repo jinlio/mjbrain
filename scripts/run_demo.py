@@ -37,6 +37,8 @@ import urllib.request
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_URL = "https://game.maj-soul.com/1/"
 FRAMES_DIR = pathlib.Path("data/raw/ms_frames")
+ADVISOR_URL = "http://127.0.0.1:8765"
+ADV_MAX_RESTARTS = 5
 CKPT_CHAIN = ("checkpoints/m3-final-0.7410",
               "dist/rescue-20260923/extracted/checkpoints",
               "checkpoints/m3-orig-0.7098",
@@ -202,11 +204,13 @@ def main(argv=None) -> int:
     try:
         adv_cmds = {"advisor": cmds.pop("advisor")}
         procs.update(spawn(adv_cmds))
-        if not wait_healthy("http://127.0.0.1:8765", procs["advisor"]):
+        if not wait_healthy(ADVISOR_URL, procs["advisor"]):
             print("! advisor 未就绪（上面 [advisor] 输出即原因：ckpt/端口？）")
             return 1
         procs.update(spawn(cmds))
         print("[run_demo] 就绪：浏览器里登录/打牌即可；Ctrl-C 收工（浏览器保留）。")
+        adv_cmd = adv_cmds["advisor"]
+        adv_restarts = 0
         while procs:
             time.sleep(0.5)
             for name in list(procs):
@@ -214,6 +218,18 @@ def main(argv=None) -> int:
                 if p.poll() is not None:
                     print(f"[run_demo] {name} 退出（code={p.returncode}）")
                     procs.pop(name)
+                    if name == "advisor" and adv_restarts < ADV_MAX_RESTARTS:
+                        # advisor 是链的基石：死了≠收工，原地重拉。live 自带
+                        # 持续重试，复活即续供（权重重载 ~20s，牌局照常进行）
+                        adv_restarts += 1
+                        print(f"[run_demo] ! advisor 死亡，自动重拉"
+                              f"（第 {adv_restarts}/{ADV_MAX_RESTARTS} 次）", flush=True)
+                        procs["advisor"] = spawn({"advisor": adv_cmd})["advisor"]
+                        if wait_healthy(ADVISOR_URL, procs["advisor"]):
+                            print("[run_demo] advisor 已复活，推荐续供", flush=True)
+                        else:
+                            print("[run_demo] advisor 本次重拉失败（见 [advisor] 输出）",
+                                  flush=True)
     except KeyboardInterrupt:
         print("\n[run_demo] 收工（浏览器保留运行，对局不断线；下次运行自动续连）")
     finally:

@@ -89,3 +89,38 @@ def test_react_reach_declaration_branch():
     r = d["reach"]
     assert r["legal_n"] == 1 and r["recommend"] == "dahai:E"  # 唯一保听 = 摸到的 1z
     assert r["top"][0]["p"] == 1.0  # 单候选短路
+
+
+def test_handler_survives_react_kernel_crash(monkeypatch):
+    """毒请求回归（2026-09-25 advisor 静默死亡复盘）：react 抛任何异常，
+    服务只回 500，进程必须继续服务。"""
+    import http.client
+    import threading
+
+    import advisor.server as srv_mod
+
+    def boom(*a, **k):
+        raise RuntimeError("注入的内核炸点")
+
+    monkeypatch.setattr(srv_mod, "react", boom)
+    httpd = srv_mod.ThreadingHTTPServer(("127.0.0.1", 0), srv_mod.Handler)
+    port = httpd.server_address[1]
+    th = threading.Thread(target=httpd.serve_forever, daemon=True)
+    th.start()
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("POST", "/v1/react",
+                     body=json.dumps({"events": REACH_STREAM, "seat": 0}).encode(),
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        payload = json.loads(resp.read().decode())
+        conn.close()
+        assert resp.status == 500 and "内核异常" in payload["error"]
+        # 服务还活着：健康检查照常应答
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("GET", "/v1/health")
+        assert conn.getresponse().status == 200
+        conn.close()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

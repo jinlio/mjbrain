@@ -165,8 +165,20 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as ex:  # noqa: BLE001 —— 坏请求 400 而非崩服务
             self._send(400, {"error": f"请求体不合 JSON 或缺 events: {ex}"})
             return
-        with _lock:
-            self._send(200, react(events, seat, self.ckpt, self.device, top=top))
+        try:
+            with _lock:
+                result = react(events, seat, self.ckpt, self.device, top=top)
+        except BaseException as ex:  # noqa: BLE001 —— 内核炸了也只回 500：
+            # 单请求永不带崩服务（torch/内存类 RuntimeError 不是 ValueError
+            # 那层能兜住的，2026-09-25 重连时段 advisor 静默死亡复盘）
+            import traceback
+            traceback.print_exc()
+            try:
+                self._send(500, {"error": f"react 内核异常: {type(ex).__name__}: {ex}"})
+            except Exception:  # noqa: BLE001 —— 客户端已断开，无妨
+                pass
+            return
+        self._send(200, result)
 
 
 def main() -> None:
