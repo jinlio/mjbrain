@@ -36,6 +36,11 @@ def _git_hash() -> str:
 
 class RunLog:
     def __init__(self, tag: str, config: dict, *, root: str | pathlib.Path | None = None) -> None:
+        # run_id 会被 checkpoints/、runs/、预测 dump 三侧复用；tag 含路径
+        # 分隔符或 .. 会让这些落盘点静默逃出预期目录（静态审计的 path
+        # traversal 源头）。在唯一产出点拦住，调用方（含 trainer）无需改。
+        if not tag or any(sep in tag for sep in ("/", "\\", "..")):
+            raise ValueError(f"tag 须为非空路径安全串（无 / \\ ..）：{tag!r}")
         repo = pathlib.Path(__file__).resolve().parents[1]
         self.root = pathlib.Path(root) if root else repo / "runs"
         ts = _dt.datetime.now(_dt.UTC).strftime("%Y%m%dT%H%M%SZ")

@@ -129,6 +129,12 @@ def main(argv=None) -> int:
     ap.add_argument("--no-log", action="store_true", help="不落盘推荐记录")
     args = ap.parse_args(argv)
 
+    # --url 是全链唯一动态服务地址：协议/host 校验后才进 urlopen；
+    # 指向非本机时明示"事件流将离开本机"（LAN advisor 合法，故提示不拦）
+    from brain import net
+    args.url = net.normalize_http_base(args.url, "--url")
+    net.warn_if_not_loopback(args.url)
+
     while args.follow and not args.jsonl.exists():
         print(f"等 {args.jsonl} 出现…", file=sys.stderr)
         time.sleep(1.0)

@@ -129,13 +129,21 @@ def preflight(args, ckpt: pathlib.Path | None,
 
 
 def wait_healthy(url: str, proc: subprocess.Popen, timeout: float = 120.0) -> bool:
-    """轮询 advisor /v1/health；子进程提前退出判失败。"""
+    """轮询 advisor /v1/health；子进程提前退出判失败。
+
+    advisor 是本脚本拉起的本机子进程——请求目标必须是 loopback 字面量，
+    协议/host 双校验后才进 urlopen（且只允许 GET /v1/health 无重定向面）。
+    """
+    from brain import net  # main 已 insert sys.path
+
+    url = net.require_loopback(net.normalize_http_base(url), "advisor 地址")
     t0 = time.time()
     while time.time() - t0 < timeout:
         if proc.poll() is not None:
             return False
         try:
-            with urllib.request.urlopen(url + "/v1/health", timeout=2) as r:
+            with urllib.request.urlopen(
+                    url + "/v1/health", timeout=2) as r:  # noqa: S310 校验见上
                 if json.loads(r.read().decode()).get("ok"):
                     return True
         except (urllib.error.URLError, OSError, ValueError):

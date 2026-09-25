@@ -21,3 +21,15 @@ def test_runlog_lifecycle(tmp_path):
     idx = (tmp_path / "RUNS.md").read_text(encoding="utf-8")
     assert log.run_id in idx
     assert "final_loss=0.3" in idx
+
+
+def test_runlog_rejects_path_unsafe_tag(tmp_path):
+    import pytest
+
+    from brain.runlog import RunLog
+
+    for bad in ("a/b", "a\\b", "..", "x..y", ""):
+        with pytest.raises(ValueError, match="tag"):
+            RunLog(bad, config={}, root=tmp_path)
+    # 正常 tag 不误伤
+    RunLog("rlcd-ok_1", config={}, root=tmp_path)

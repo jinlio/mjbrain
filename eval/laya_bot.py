@@ -37,6 +37,63 @@ def _load(ckpt: str) -> dict:
         return _build_locked(key)
 
 
+def _sha256_file(path: pathlib.Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for blk in iter(lambda: f.read(1 << 20), b""):
+            h.update(blk)
+    return h.hexdigest()
+
+
+def _read_sums(path: pathlib.Path) -> dict[str, str]:
+    """`<sha256>  <相对路径>` 行（shasum -c 格式）-> {rel: hash}。"""
+    out: dict[str, str] = {}
+    for ln in path.read_text(encoding="utf-8").splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        parts = ln.split(None, 1)
+        if len(parts) != 2:
+            raise RuntimeError(f"{path.name} 行格式坏：{ln!r}")
+        out[parts[1].strip().lstrip("*").replace("\\", "/")] = parts[0].lower()
+    return out
+
+
+def _verify_ckpt_dir(ck: pathlib.Path) -> None:
+    """权重完整性：载模型前逐条比对目录内 SHA256SUMS / VERIFY-SHA256.txt。
+
+    威胁模型=Release 资产换包（advisor 被喂假权重=建议注入）。清单里列的
+    每个文件必须存在且哈希一致，否则 RuntimeError；没有清单（训练 run 的
+    原生 ckpt）静默跳过。逃生门 MJBRAIN_SKIP_CKPT_VERIFY=1（调试专用）。
+    """
+    import os
+
+    if os.environ.get("MJBRAIN_SKIP_CKPT_VERIFY") == "1":
+        print(f"[laya_bot] 警告：MJBRAIN_SKIP_CKPT_VERIFY=1，已跳过 {ck} 完整性校验")
+        return
+    manifest = None
+    for name in ("SHA256SUMS", "VERIFY-SHA256.txt"):
+        cand = ck / name
+        if cand.exists():
+            manifest = cand
+            break
+    if manifest is None:
+        return
+    for rel, want in _read_sums(manifest).items():
+        target = (ck / rel).resolve()
+        if not target.is_relative_to(ck.resolve()):  # 清单被塞 ../ 行也拦住
+            raise RuntimeError(f"完整性清单路径越界：{rel!r}")
+        if not target.exists():
+            raise RuntimeError(f"权重文件缺失：{target}（清单 {manifest.name}）")
+        got = _sha256_file(target)
+        if got != want:
+            raise RuntimeError(
+                f"权重完整性失配：{rel}\n  期望 {want}\n  实得 {got}\n"
+                f"  来源可疑（换包/截断）——勿用此 ckpt，重新从 Release 下载")
+
+
 def _build_locked(key: str) -> dict:
     import torch
     from laya.common import build_model
@@ -50,8 +107,16 @@ def _build_locked(key: str) -> dict:
     if not tok_dir.exists():
         # 不给 from_pretrained 兜底成 hub repo-id 的机会：离线机整挂起重试
         raise RuntimeError(f"tokenizer 目录缺失：{tok_dir}（Release 解压不全？）")
-    tok = AutoTokenizer.from_pretrained(tok_dir)
-    model = build_model(cfg, encoder_dir=str(p / "encoder"))
+    enc_dir = p / "encoder"
+    if not enc_dir.exists():
+        # build_model 在 encoder 目录缺失时按 cfg["encoder"] 的 repo-id 联网
+        # 拉 hub 模型——被投毒的 rl_agent_config.json 可借此执行远端代码。
+        # 与 tokenizer 同口径硬检，彻底断网。
+        raise RuntimeError(f"encoder 目录缺失：{enc_dir}（拒绝 hub 回退）")
+    _verify_ckpt_dir(p)  # 载权重前最后一道闸：哈希对不上什么都不建
+    # trust_remote_code=False：把"版本默认"变成"结构保证"
+    tok = AutoTokenizer.from_pretrained(tok_dir, trust_remote_code=False)
+    model = build_model(cfg, encoder_dir=str(enc_dir))
     model.load_state_dict(load_file(str(p / "model.safetensors")), strict=True)
     if torch.cuda.is_available():
         device = torch.device("cuda")
