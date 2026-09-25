@@ -33,16 +33,15 @@ def host_of(base: str) -> str:
     return urlsplit(base).hostname or ""
 
 
+def is_loopback(base: str) -> bool:
+    return host_of(base) in _LOOPBACK
+
+
 def require_loopback(base: str, what: str = "服务地址") -> str:
     """字面 host 必须 ∈ 环回白名单：调用方自己拉起本机子进程服务的场景
     （run_demo → advisor）用这个，杜绝"健康检查打到别人家/元数据端点"。"""
-    if host_of(base) not in _LOOPBACK:
+    if not is_loopback(base):
         raise SystemExit(f"{what}只准指本机（127.0.0.1/::1/localhost），得 {base!r}")
     return base
 
 
-def warn_if_not_loopback(base: str) -> None:
-    """非本机 advisor 只提示不拦（LAN 部署合法），但数据流向要说清。"""
-    h = host_of(base)
-    if h not in _LOOPBACK:
-        print(f"[net] 提示：请求发往非本机地址 {base}——事件流将离开本机")

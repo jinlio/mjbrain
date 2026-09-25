@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from brain.net import normalize_http_base, require_loopback, warn_if_not_loopback
+from brain.net import is_loopback, normalize_http_base, require_loopback
 
 
 def test_normalize_accepts():
@@ -29,8 +29,8 @@ def test_require_loopback():
         require_loopback("http://metadata.google.internal")
 
 
-def test_warn_non_loopback(capsys):
-    warn_if_not_loopback("http://127.0.0.1:8765")
-    assert capsys.readouterr().out == ""
-    warn_if_not_loopback("http://192.168.1.7:8765")
-    assert "离开本机" in capsys.readouterr().out
+def test_is_loopback():
+    assert is_loopback("http://127.0.0.1:8765")
+    assert is_loopback("http://localhost:8765")
+    assert not is_loopback("http://192.168.1.7:8765")
+    assert not is_loopback("https://evil.example")

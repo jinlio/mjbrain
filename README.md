@@ -65,7 +65,7 @@ pytest -q                             # 测试（依赖棋谱样本的用例缺�
 | 告警 | 处置 |
 |---|---|
 | laya_bot ckpt 路径污点（path-traversal / code-injection，HIGH×2） | **已修**：encoder/tokenizer 目录双硬检（断 hub 联网回退）、tokenizer 显式 `trust_remote_code=False`、启动期逐文件 SHA256 校验；污点源头本就是操作员自设 `--ckpt`/环境变量，属信任边界内 |
-| 脚本动态 URL 未校验（SSRF，HIGH×2） | **已修**：`brain/net.py` 统一协议/host 校验口；run_demo 健康检查强制 loopback（advisor 系本机拉起），live_from_capture 非本机时明示数据流向 |
+| 脚本动态 URL 未校验（SSRF，HIGH×2） | **已修**：`brain/net.py` 统一协议/host 校验口；run_demo 健康检查强制 loopback（advisor 系本机拉起）；live_from_capture fail-closed——非本机 `--url` 必须 `--allow-remote` 显式放行（事件流默认不出本机） |
 | trainer 路径拼接（HIGH×2） | **已收口**：run_id 唯一产出点 `RunLog` 拒 `/ \ ..` 的 tag；剩余写入路径均为操作员 CLI，接受 |
 | trainer `torch.load(weights_only=False)`（HIGH×2） | **移交**：文件均为训练器自产（cache/resume），且属配方红线文件——`weights_only=True` 加固并入 Windows 侧下次动 trainer 时验证 resume 兼容后落地 |
 | 对局种子 RNG（LOW×2） | **接受**：arena 可复现性是方法论（种子=席次/规格），非密码学用途 |

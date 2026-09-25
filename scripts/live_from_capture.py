@@ -50,6 +50,10 @@ STAT = {"path": None, "n": 0}
 
 
 def post_react(url: str, payload: dict, timeout: float = 30.0) -> dict:
+    from brain import net
+    # 校验贴着 sink：本函数任何调用方（含未来新增）都过同一道协议/host 闸，
+    # 不依赖调用前先规范化——污点在进入 urlopen 前最后一行被处置
+    url = net.normalize_http_base(url, "advisor 地址")
     req = urllib.request.Request(
         url + "/v1/react",
         data=json.dumps(payload).encode("utf-8"),
@@ -120,6 +124,8 @@ def main(argv=None) -> int:
                     help="座位号；缺省自动取状态机从 AuthGame 帧识别的自家座位")
     ap.add_argument("--url", default="http://127.0.0.1:8765",
                     help="advisor.server 地址（默认本机 8765）")
+    ap.add_argument("--allow-remote", action="store_true",
+                    help="放行 --url 指向非本机 advisor（默认关：mjai 事件流不出本机）")
     ap.add_argument("--top", type=int, default=5)
     ap.add_argument("--follow", action="store_true",
                     help="尾随模式：读到文件尾不退出，等捕获追加")
@@ -130,10 +136,15 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     # --url 是全链唯一动态服务地址：协议/host 校验后才进 urlopen；
-    # 指向非本机时明示"事件流将离开本机"（LAN advisor 合法，故提示不拦）
+    # host 边界 fail-closed——非本机必须 --allow-remote 显式放行
     from brain import net
     args.url = net.normalize_http_base(args.url, "--url")
-    net.warn_if_not_loopback(args.url)
+    if not net.is_loopback(args.url):
+        if not args.allow_remote:
+            print(f"--url 指向非本机地址 {args.url}：需 --allow-remote 显式放行"
+                  f"（注意：mjai 事件流将离开本机）", file=sys.stderr)
+            return 1
+        print(f"[net] 提示：请求发往非本机地址 {args.url}——事件流离开本机")
 
     while args.follow and not args.jsonl.exists():
         print(f"等 {args.jsonl} 出现…", file=sys.stderr)
