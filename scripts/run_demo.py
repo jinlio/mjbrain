@@ -13,8 +13,8 @@ Windows 的 run_demo.bat / Mac 终端跑同一套（本脚本只依赖标准库�
 - live_from_capture --follow：帧 → /v1/react → 终端 + `<frames>.advise.jsonl`；
 - hud.float --wait：尾随该 JSONL 的悬浮小窗（不注入页面）。
 
-权重缺省按链探测：dist/rescue 原盘 → checkpoints/m3-orig-0.7098 → rlcd-gate
-（与旧 run_demo.bat 同链；--ckpt 可显式指定）。
+权重缺省按链探测：checkpoints/m3-final-0.7410 → dist/rescue 原盘 →
+m3-orig-0.7098 → rlcd-gate（--ckpt 可显式指定）。
 
 Ctrl-C：收掉子进程；**浏览器保留**（对局不断线，下次运行续连）。
 帧文件轮转 data/raw/ms_frames/run<N>.jsonl（与历史场次不串号）。
@@ -37,7 +37,8 @@ import urllib.request
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_URL = "https://game.maj-soul.com/1/"
 FRAMES_DIR = pathlib.Path("data/raw/ms_frames")
-CKPT_CHAIN = ("dist/rescue-20260923/extracted/checkpoints",
+CKPT_CHAIN = ("checkpoints/m3-final-0.7410",
+              "dist/rescue-20260923/extracted/checkpoints",
               "checkpoints/m3-orig-0.7098",
               "checkpoints/20260921T184331Z-rlcd-gate")
 
@@ -187,7 +188,7 @@ def main(argv=None) -> int:
             print(ln)
         return 0
     if ckpt is None or not ckpt.exists():
-        print("没找到权重：把 Release zip 解压到 checkpoints/m3-orig-0.7098/ "
+        print("没找到权重：把 Release zip 解压到 checkpoints/m3-final-0.7410/ "
               "或 --ckpt 指定。", file=sys.stderr)
         return 1
 

@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from advisor import hints
 
-_DEFAULT_CKPT = "checkpoints/20260921T184331Z-rlcd-gate"
+_DEFAULT_CKPT = "checkpoints/m3-final-0.7410"
 
 _adviser = None
 # 可重入：do_POST 全程持锁（前向串行），_get_adviser 也在锁内取用

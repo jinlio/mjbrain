@@ -53,7 +53,7 @@ pytest -q                             # 测试（依赖棋谱样本的用例缺�
 
 ### 权重
 
-微调权重随 [Releases](https://github.com/jinlio/mjbrain/releases/tag/m3-orig-0.7098) 单独分发：`m3-orig-0.7098`，zip 约 805 MB。下载后解压到 `checkpoints/<run_id>/`（内含 `model.safetensors` + `encoder/` + `tokenizer/` + `rl_agent_config.json`），或启动时用 `--ckpt` 指向任意目录。包内 `MODEL_CARD.md` 记载出处、训练数据、held-out 指标与使用限制，`SHA256SUMS` 供逐文件校验；外层 zip 摘要 `9a63b3e80716a9e1c53aa55a146935a8de262bef16587dda1cad0521cab22f6d`。
+微调权重随 [Releases](https://github.com/jinlio/mjbrain/releases/tag/m3-final-0.7410) 单独分发：当前最新为 `m3-final-0.7410`（held-out top-1 74.1%），zip 约 1,608 MB，外层摘要 `9e37fd0bed65005f7ad08b13ba4917018cfc2a890be7b5b73734c71f697c8138`；上一版 `m3-orig-0.7098`（约 805 MB，摘要 `9a63b3e80716a9e1c53aa55a146935a8de262bef16587dda1cad0521cab22f6d`）仍在 Releases 页可取。下载后解压到 `checkpoints/<版本名>/`（如 `checkpoints/m3-final-0.7410/`，内含 `model.safetensors` + `encoder/` + `tokenizer/` + `rl_agent_config.json`），脚本默认按链探测该目录；也可启动时用 `--ckpt` 指向任意目录。包内 `MODEL_CARD.md` 记载出处、训练数据、held-out 指标与使用限制，`SHA256SUMS` 供逐文件校验。
 
 > 权重许可与上游约束见包内 `MODEL_CARD.md` 与 [LICENSES.md](LICENSES.md)；语料、决策样本、Mortal 代码均**不随仓库分发**。
 

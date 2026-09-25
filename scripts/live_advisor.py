@@ -118,7 +118,7 @@ def main() -> int:
     ap.add_argument("--seat", type=int, default=-1, help="只看某座位（-1=所有开窗家）")
     ap.add_argument(
         "--ckpt",
-        default="checkpoints/20260921T184331Z-rlcd-gate",
+        default="checkpoints/m3-final-0.7410",
         help="B3 权重目录",
     )
     # ---- 手输模式参数（配 --hand）----
