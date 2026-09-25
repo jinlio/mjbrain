@@ -10,11 +10,11 @@
 - **锁定/解锁**：右键菜单切换（或按 L 键）。锁定=不可拖，防误触。
 
 形态与差异：
-- Windows/X11：overrideredirect 无边框 + -topmost 置顶 + -alpha 半透明。
-- macOS：overrideredirect 不可靠 → 改走 Aqua Tk 内部命令
-  `::tk::unsupported::MacWindowStyle … plain none` 摘掉标题栏与红绿灯；
-  命令不可用的 Tk 版本退回带标题栏小窗（仍置顶）。alpha 在 Aqua Tk 上
-  支持有限，不支持时自动跳过。
+- 全平台 overrideredirect 无边框 + -topmost 置顶 + -alpha 半透明。
+  （macOS：曾在 Tk 8.6.13/conda-forge 实测 overrideredirect 帧高==内容高，
+  真正无边框；`::tk::unsupported::MacWindowStyle plain none` 反而只改内部
+  记账、原生标题栏不动，勿再走回头路。个别老 Tk 版若 overrideredirect
+  不生效，退回带标题栏窗，行为不坏。）
 - 没有 Tk（conda 缺包）→ 明确报"装 tkinter"并退出，不静默。
 
 启动：python -m hud.float --advise data/raw/ms_frames/run1.advise.jsonl
@@ -122,13 +122,9 @@ class HudApp:
 
         self.root = tk.Tk()
         self.root.title("mjbrain HUD")
-        if sys.platform == "darwin":
-            # overrideredirect 不可靠；MacWindowStyle 摘掉标题栏+红绿灯，
-            # 拖动/右键菜单本就绑在整窗上，不依赖标题栏
-            self.frameless = self._strip_mac_chrome()
-        else:
-            self.frameless = True
-            self.root.overrideredirect(True)
+        # 全平台无边框：mac 在 Tk 8.6.13 实测 overrideredirect 即帧高==内容高
+        # （MacWindowStyle 只改内部记账不改原生标题栏，已证伪，勿用）
+        self.root.overrideredirect(True)
         self._try_alpha(self.s["alpha"])
         self.root.attributes("-topmost", self.s["topmost"])
         self.root.configure(bg="#101418")
@@ -155,16 +151,6 @@ class HudApp:
             self.root.attributes("-alpha", max(0.3, min(1.0, a)))
         except Exception:  # noqa: BLE001 —— Aqua 等不支持时静默跳过
             pass
-
-    def _strip_mac_chrome(self) -> bool:
-        """macOS：摘掉标题栏（含红绿灯/标题）。成功 True；
-        该命令是 Tk 内部接口，个别版本没有→False，退回带标题栏窗。"""
-        try:
-            self.root.tk.call("::tk::unsupported::MacWindowStyle", "style",
-                              self.root._w, "plain", "none")
-            return True
-        except Exception:  # noqa: BLE001 —— 内部命令缺失/签名变动都退回原形态
-            return False
 
     def _drag_start(self, ev) -> None:
         if self.s["locked"]:
