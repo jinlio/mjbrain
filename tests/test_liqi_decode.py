@@ -4,6 +4,8 @@
 真实 descriptor 联测在 scripts/compile_liqi_proto.py 之后另行冒烟。
 """
 
+import pytest
+
 from capture.liqi import decode as D
 
 
@@ -100,3 +102,13 @@ def test_decode_restore_vs_live_roundtrip():
     for i in range(len(enc)):
         enc[i] ^= (base + 5 * i + key[i % 9]) & 0xFF
     assert D.decode_action_bytes(base64.b64encode(enc).decode()) == plain
+
+
+def test_wrapper_varint_guards():
+    # 畸形帧必须报 ValueError（=丢帧），不许 IndexError/错值冒头
+    with pytest.raises(ValueError, match="varint 截断"):
+        D.decode_wrapper(b"\x0a\x80")  # 续位=1 但缓冲到头
+    with pytest.raises(ValueError, match="varint 超长"):
+        D.decode_wrapper(b"\x0a" + b"\x80" * 10 + b"\x01")  # >64bit 的伪 varint
+    with pytest.raises(ValueError, match="长度越界"):
+        D.decode_wrapper(b"\x0a\x64" + b"x" * 10)  # 声明 100 字节只给 10

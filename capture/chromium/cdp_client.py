@@ -54,10 +54,13 @@ class CdpWatcher:
         msg: dict = {"id": mid, "method": method, "params": params or {}}
         if session_id:
             msg["sessionId"] = session_id
-        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[mid] = fut
-        await self._ws.send(json.dumps(msg))
-        return await asyncio.wait_for(fut, timeout=15)
+        try:  # 超时/发送失败都要回销 pending，否则 future 逐次泄漏
+            await self._ws.send(json.dumps(msg))
+            return await asyncio.wait_for(fut, timeout=15)
+        finally:
+            self._pending.pop(mid, None)
 
     async def run(self, stop: asyncio.Event | None = None) -> None:
         self._ws = await websockets.connect(self._url, max_size=64 * 2**20)
@@ -94,13 +97,19 @@ class CdpWatcher:
         assert self._ws is not None
         try:
             async for raw in self._ws:
-                msg = json.loads(raw)
-                if "id" in msg:
-                    fut = self._pending.pop(msg["id"], None)
-                    if fut and not fut.done():
-                        fut.set_result(msg.get("result", {}))
-                    continue
-                await self._on_event(msg)
+                # 单条消息容错：坏 JSON/坏帧只丢这一条。曾把 try 架在整循环外，
+                # 一帧畸形 payloadData 就掀翻读循环 → 捕获永久静默停摆
+                # （连接级异常由 async for 自身抛出，照常终止，交上层重连）
+                try:
+                    msg = json.loads(raw)
+                    if "id" in msg:
+                        fut = self._pending.pop(msg["id"], None)
+                        if fut and not fut.done():
+                            fut.set_result(msg.get("result", {}))
+                        continue
+                    await self._on_event(msg)
+                except Exception:
+                    log.exception("cdp 单条消息处理失败（跳过，读循环存活）")
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -114,7 +123,7 @@ class CdpWatcher:
         page = next((p for p in self._pages.values() if p.session_id == sid), None)
         if page is None:
             return
-        p = msg["params"]
+        p = msg.get("params") or {}  # 缺 params 的事件按空处理，不杀读循环
         rid = p.get("requestId", "")
         if m == "Network.webSocketCreated":
             self._req_page[rid] = page.target_id
@@ -136,7 +145,11 @@ def decode_frame_payload(resp: dict) -> bytes | None:
     opcode = resp.get("opcode", -1)
     pd = resp.get("payloadData", "")
     if opcode == 2:
-        return base64.b64decode(pd)
+        try:  # validate=True：默认模式会静默丢弃非字母表字符（"!!!"→b''），
+            # 畸形帧就伪装成一条合法的空事件流。binascii.Error 是 ValueError 子类
+            return base64.b64decode(pd, validate=True)
+        except ValueError:
+            return None
     if opcode == 1:
         return pd.encode("utf-8", "replace")
     return None

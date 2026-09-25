@@ -49,20 +49,22 @@ def load_events(frames: pathlib.Path, seat: int | None):
     if seat is not None:
         st.seat = seat
     events: list[dict] = []
-    for line in frames.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            fr = p.parse(base64.b64decode(json.loads(line)["b64"]))
-        except Exception:  # noqa: BLE001,S112 —— 噪声/截断行
-            continue
-        if fr is None:
-            continue
-        try:
-            events.extend(st.dispatch(fr.kind, fr.method, fr.payload))
-        except Exception:  # noqa: BLE001,S112 —— 丢帧不丢整局
-            continue
+    # 逐行流式读：长场次帧文件可达数百 MB，read_text 一次性进内存会爆
+    with frames.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                fr = p.parse(base64.b64decode(json.loads(line)["b64"]))
+            except Exception:  # noqa: BLE001,S112 —— 噪声/截断行
+                continue
+            if fr is None:
+                continue
+            try:
+                events.extend(st.dispatch(fr.kind, fr.method, fr.payload))
+            except Exception:  # noqa: BLE001,S112 —— 丢帧不丢整局
+                continue
     return events, st
 
 
@@ -151,6 +153,11 @@ def judge(rec: str, ev: dict, ev_idx: int, events: list[dict], seat: int):
 
 
 def main(argv=None) -> int:
+    # 重定向时 → 等字符在 Windows 本地编码下会 UnicodeEncodeError；兜重定向
+    import sys as _sys
+    for _s in (_sys.stdout, _sys.stderr):
+        if hasattr(_s, "reconfigure"):
+            _s.reconfigure(errors="replace")
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--frames", required=True, type=pathlib.Path)
     ap.add_argument("--advise", type=pathlib.Path, default=None)
@@ -238,7 +245,9 @@ def main(argv=None) -> int:
                 j, da = next_self_action(events, (ev_i or 0) + 1, tgt)
                 if da is not None and da.get("type") == "dahai":
                     decl_n += 1
-                    if norm_tile(rw.split(":", 1)[1]) == norm_tile(da.get("pai", "")):
+                    # 无冒号的历史/异常格式串不许 IndexError 崩掉整个对照跑
+                    rw_pai = rw.split(":", 1)[1] if ":" in rw else rw
+                    if norm_tile(rw_pai) == norm_tile(da.get("pai", "")):
                         decl_ok += 1
                     else:
                         mis_examples.append({

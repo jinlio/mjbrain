@@ -91,9 +91,16 @@ class Furo:
         kind = parts[1]
         if kind not in ("chi", "pon", "daiminkan", "ankan", "kakan"):
             raise ValueError(f"未知 furo kind: {kind!r}")
-        actor = int(parts[0])
+        try:  # 手输 furo 常见错是位置串了（如把 pos= 写进 actor 位）——
+            # 给出带原文的错，而不是裸 ValueError('x') 让人回头猜哪段
+            actor = int(parts[0])
+        except ValueError:
+            raise ValueError(f"furo actor 非整数: {s!r}") from None
         pai = _norm(parts[2]) if parts[2] not in ("", "-") else ""
-        frm = int(parts[3]) if len(parts) > 3 and parts[3] not in ("", "-") else -1
+        try:
+            frm = int(parts[3]) if len(parts) > 3 and parts[3] not in ("", "-") else -1
+        except ValueError:
+            raise ValueError(f"furo from 非整数: {s!r}") from None
         consumed: list[str] = []
         pos = -1
         for tk in parts[4:]:
@@ -168,14 +175,29 @@ class BoardSpec:
             raise ValueError("须给 4 家河（可空）")
         if (self.draw is None) == (self.last is None):
             raise ValueError("draw 与 last 必须二选一")
+        if not 0 <= self.seat <= 3:
+            raise ValueError(f"seat 须 0..3，得 {self.seat}")
+        if not 0 <= self.oya <= 3:
+            raise ValueError(f"oya 须 0..3，得 {self.oya}")
         if self.last:
             pai, frm = self.last
+            # 范围必查：负 frm 会拿 rivers[-1] 静默比对错误的河（越界则是裸
+            # IndexError 抛给手输用户）
+            if not 0 <= frm <= 3:
+                raise ValueError(f"last 的 from 须 0..3，得 {frm}")
             rv = self.rivers[frm]
             if not rv or _base(rv[-1]) != _base(pai):
                 raise ValueError(
                     f"last {pai}<-{frm} 须为 seat{frm} 河尾（现="
                     f"{rv[-1] if rv else '空'}）")
         for i, f in enumerate(self.furos):
+            if not 0 <= f.actor <= 3:
+                raise ValueError(f"furo[{i}] actor 须 0..3，得 {f.actor}")
+            # 越界的 actor/frm 会让鸣牌永远匹配不上时间线 → 烧满 guard 抛
+            # 误导性的"时间线发散"；这里给精确错。chi/pon/daiminkan 的
+            # frm>=0 已在 Furo.parse 把关，此处补上界
+            if f.kind in ("chi", "pon", "daiminkan") and not 0 <= f.frm <= 3:
+                raise ValueError(f"furo[{i}] from 须 0..3，得 {f.frm}")
             if f.kind == "chi" and f.actor != (f.frm + 1) % 4:
                 raise ValueError(f"furo[{i}] chi 只能鸣上家")
             if f.kind in ("pon", "daiminkan") and f.actor == f.frm:

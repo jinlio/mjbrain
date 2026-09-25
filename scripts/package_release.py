@@ -105,7 +105,9 @@ def main() -> int:
         items=summary.get("items", "?"),
         steps=summary.get("steps", "?"),
         epochs=summary.get("epochs", "?"),
-        train_h=round(summary.get("train_seconds", 0) / 3600, 1) if summary else "?",
+        # float() 兜住 summary 该键是字符串/None 的手改情形，别在打包最后一步崩
+        train_h=(round(float(summary.get("train_seconds") or 0) / 3600, 1)
+                 if summary else "?"),
         val_items=summary.get("val_items", "?"),
         date=datetime.datetime.now().astimezone().date().isoformat(),
         metrics_rows=metrics_rows(summary),
@@ -127,18 +129,22 @@ def main() -> int:
         sums.append(f"{sha256_file(p)}  {arc}")
 
     tmp = zip_path.with_suffix(".zip.tmp")
-    with zipfile.ZipFile(tmp, "w") as zf:
-        for p, arc in entries:
-            # safetensors 已是紧凑二进制，压缩只烧 CPU 不减体积
-            ct = (
-                zipfile.ZIP_STORED
-                if p.suffix == ".safetensors"
-                else zipfile.ZIP_DEFLATED
-            )
-            zf.write(p, arc, compress_type=ct)
-        zf.writestr("MODEL_CARD.md", card, compress_type=zipfile.ZIP_DEFLATED)
-        zf.writestr("SHA256SUMS", "\n".join(sums) + "\n", compress_type=zipfile.ZIP_DEFLATED)
-    tmp.replace(zip_path)
+    try:  # 写一半失败（磁盘满/源文件被抽走）不许留 .zip.tmp 尸体误导人
+        with zipfile.ZipFile(tmp, "w") as zf:
+            for p, arc in entries:
+                # safetensors 已是紧凑二进制，压缩只烧 CPU 不减体积
+                ct = (
+                    zipfile.ZIP_STORED
+                    if p.suffix == ".safetensors"
+                    else zipfile.ZIP_DEFLATED
+                )
+                zf.write(p, arc, compress_type=ct)
+            zf.writestr("MODEL_CARD.md", card, compress_type=zipfile.ZIP_DEFLATED)
+            zf.writestr("SHA256SUMS", "\n".join(sums) + "\n", compress_type=zipfile.ZIP_DEFLATED)
+        tmp.replace(zip_path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
     zsha = sha256_file(zip_path)
     (zip_path.with_suffix(zip_path.suffix + ".sha256")).write_text(

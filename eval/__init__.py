@@ -57,6 +57,9 @@ class HeuristicBot:
         self._rng = random.Random(seed)
 
     def react(self, events, seat: int, legal_actions: list[str]) -> str:
+        if not legal_actions:  # 契约防御：randrange(0) 的裸 ValueError 换成有说明的
+            raise ValueError("B1.react：legal_actions 为空，无动作可选")
+
         def typ(a):
             return json.loads(a)["type"]
 
@@ -94,23 +97,28 @@ class HeuristicBot:
         except ImportError:
             return discards
 
-        _t = self._tid
-        hand: list[int] = []
-        melded = False
-        for ev in events:
-            t = ev.get("type")
-            if t == "start_kyoku":
-                hand = [_t(p) for p in ev["tehais"][seat]]
-                melded = False
-            elif t == "tsumo" and ev.get("actor") == seat:
-                hand.append(_t(ev["pai"]))
-            elif t == "dahai" and ev.get("actor") == seat:
-                tile = _t(ev["pai"])
-                if tile in hand:
-                    hand.remove(tile)
-            elif t in ("pon", "chi", "daiminkan", "kakan", "ankan") and ev.get("actor") == seat:
-                melded = True
-        if melded or len(hand) < 8:
+        # 重建段整块兜底：异常牌名(parse_tile ValueError)/缺键(tehais)都只是
+        # "退回不优化"，B1 作为线上兜底不许因输入脏而崩
+        try:
+            _t = self._tid
+            hand: list[int] = []
+            melded = False
+            for ev in events:
+                t = ev.get("type")
+                if t == "start_kyoku":
+                    hand = [_t(p) for p in ev["tehais"][seat]]
+                    melded = False
+                elif t == "tsumo" and ev.get("actor") == seat:
+                    hand.append(_t(ev["pai"]))
+                elif t == "dahai" and ev.get("actor") == seat:
+                    tile = _t(ev["pai"])
+                    if tile in hand:
+                        hand.remove(tile)
+                elif t in ("pon", "chi", "daiminkan", "kakan", "ankan") and ev.get("actor") == seat:
+                    melded = True
+            if melded or len(hand) < 8:
+                return discards
+        except BaseException:  # noqa: BLE001 — 含 Rust PanicException（非 Exception 子类）
             return discards
         scored = []
         for a in discards:
@@ -121,7 +129,9 @@ class HeuristicBot:
             rest.remove(tile)
             try:
                 scored.append((calculate_shanten(rest), a))
-            except Exception:  # noqa: BLE001 — Rust 侧任何异常都退回不优化，绝不让 B1 崩
+            except BaseException:  # noqa: BLE001 — Rust 侧任何异常都退回不优化，
+                # 绝不让 B1 崩：实测非法牌面抛的 PanicException 不是 Exception
+                # 子类，except Exception 根本兜不住（2026-09-25 全库 review）
                 return discards
         best = min(s for s, _ in scored)
         out = [a for s, a in scored if s == best]

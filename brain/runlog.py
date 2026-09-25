@@ -19,6 +19,7 @@ import os
 import pathlib
 import platform
 import subprocess
+import time
 
 
 def _git_hash() -> str:
@@ -66,6 +67,7 @@ class RunLog:
         )
         self._metrics = (self.dir / "metrics.jsonl").open("a", encoding="utf-8")
         self._t0 = _dt.datetime.now(_dt.UTC)
+        self._closed = False
 
     def _dump_config(self, config: dict) -> None:
         """无 PyYAML 依赖的降级序列化：json 是 yaml 的子集。"""
@@ -75,11 +77,36 @@ class RunLog:
         )
 
     def metric(self, step: int, **kv) -> None:
+        if self._closed:  # finish 后再来 metric：静默丢，别让日志器炸训练
+            return
         rec = {"step": step, "wall_s": (_dt.datetime.now(_dt.UTC) - self._t0).total_seconds(), **kv}
         self._metrics.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
         self._metrics.flush()
 
+    @staticmethod
+    def _idx_lock(root: pathlib.Path, timeout: float = 10.0):
+        """RUNS.md 读-改-写的跨进程锁（mkdir 原子，Win/POSIX 通用）。
+        拿不到/陈旧（持锁进程死过 60s）→ 返回 None 直接写：单次写本身有
+        tmp+replace 保证原子，最坏丢一行索引，绝不死锁。"""
+        lock = root / "RUNS.md.lock"
+        t0 = time.time()
+        while True:
+            try:
+                lock.mkdir()
+                return lock
+            except FileExistsError:
+                try:
+                    if time.time() - lock.stat().st_mtime > 60:
+                        lock.rmdir()  # 陈旧锁接管
+                        continue
+                except OSError:
+                    pass
+                if time.time() - t0 > timeout:
+                    return None
+                time.sleep(0.1)
+
     def finish(self, summary: dict) -> None:
+        self._closed = True
         self._metrics.close()
         (self.dir / "summary.json").write_text(
             json.dumps({"run_id": self.run_id, **summary}, indent=1, ensure_ascii=False, default=str) + "\n",
@@ -94,10 +121,23 @@ class RunLog:
         row = f"| {date} | {self.run_id} | {tag} | [{summary.get('status', 'ok')}] {key} |\n"
         # 插到表格末尾（最后一条 "|" 行之后），而不是文件末尾：
         # RUNS.md 可在表下另设"诊断记录"等小节，盲 append 会把行甩到小节后面。
-        lines = idx.read_text(encoding="utf-8").splitlines(keepends=True)
-        tail = [i for i, ln in enumerate(lines) if ln.startswith("|")]
-        at = tail[-1] + 1 if tail else 0
-        lines.insert(at, row)
-        tmp = idx.with_suffix(".md.tmp")
-        tmp.write_text("".join(lines), encoding="utf-8")
-        tmp.replace(idx)
+        # 读-改-写全程持跨进程锁：并发训练同时 finish 不再互吞索引行。
+        lock = self._idx_lock(self.root)
+        try:
+            lines = idx.read_text(encoding="utf-8").splitlines(keepends=True)
+            tail = [i for i, ln in enumerate(lines) if ln.startswith("|")]
+            at = tail[-1] + 1 if tail else 0
+            lines.insert(at, row)
+            tmp = idx.with_suffix(".md.tmp")
+            tmp.write_text("".join(lines), encoding="utf-8")
+            try:
+                tmp.replace(idx)
+            except PermissionError:
+                # Windows：RUNS.md 被编辑器/杀软/tail 占用时 replace 会炸。
+                # summary.json 已先落盘（真源在手），索引行降级 append 补记
+                with idx.open("a", encoding="utf-8") as f:
+                    f.write(row)
+                tmp.unlink(missing_ok=True)
+        finally:
+            if lock is not None:
+                lock.rmdir()

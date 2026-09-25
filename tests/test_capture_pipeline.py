@@ -145,3 +145,29 @@ def test_fmt_reach_chinese():
     assert line.startswith("   ↳ 若立直：宣言牌 → 切西 ")
     assert "切西 58.3%" in line and "切7饼 41.7%" in line and "切1索 5.0%" in line
     assert "切9万" not in line  # 只显示 top3
+
+
+def test_cdp_frame_decode_guards():
+    from capture.chromium.cdp_client import decode_frame_payload as dec
+    # 畸形/截断 base64（payloadData 半截）过去抛 binascii.Error 掀读循环
+    assert dec({"opcode": 2, "payloadData": "!!!"}) is None
+    assert dec({"opcode": 2, "payloadData": "aGVsbG8="}) == b"hello"
+    assert dec({"opcode": 1, "payloadData": "文"}) == "文".encode()
+    assert dec({"opcode": 9, "payloadData": "aGVsbG8="}) is None  # ping 丢弃
+    assert dec({}) is None
+
+
+def test_cdp_event_without_params_does_not_kill_loop():
+    """缺 params 的事件按空处理：读循环容错的前提是分发器自身不抛。"""
+    import asyncio
+
+    from capture.chromium.cdp_client import CdpWatcher, PageRef
+
+    w = CdpWatcher.__new__(CdpWatcher)
+    w._pages = {"t1": PageRef("t1", "s1", "ws://game")}
+    w._req_page = {}
+    w._sink = lambda *a: None
+    for m in ("Network.webSocketCreated", "Network.webSocketClosed",
+              "Network.webSocketFrameReceived", "Network.webSocketFrameSent"):
+        asyncio.run(w._on_event({"method": m, "sessionId": "s1"}))  # 不抛即过
+    asyncio.run(w._on_event({"method": "Page.javascriptDialogOpening"}))

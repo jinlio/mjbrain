@@ -107,6 +107,12 @@ def feed_lines(p, st, events: list[dict], lines) -> bool:
 
 
 def main(argv=None) -> int:
+    # 重定向到管道/文件时 ↳/→ 在 Windows 本地编码下会 UnicodeEncodeError；
+    # errors=replace 只兜重定向，终端行为不变（全库 review 统一模式）
+    import sys as _sys
+    for _s in (_sys.stdout, _sys.stderr):
+        if hasattr(_s, "reconfigure"):
+            _s.reconfigure(errors="replace")
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--jsonl", required=True, type=pathlib.Path,
                     help="run_capture.py 落盘的帧 JSONL")

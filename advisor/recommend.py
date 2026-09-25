@@ -16,9 +16,20 @@ class Adviser:
         from eval.laya_bot import _load
 
         self._L = _load(ckpt)
+        self._dev = self._L["device"]
         if device:
-            self._L["model"].to(torch.device(device))
-            self._L["device"] = torch.device(device)
+            want = torch.device(device)
+            if want != self._dev:
+                # 共享 _CACHE 条目：同进程已有别的持有者改道过设备时，
+                # 第二例再就地 to(device) 会悄悄把 arena B3 换到别的设备/
+                # 精度档上（fp16↔fp32 漂移，破坏可复现对局配）。显式拒绝。
+                if self._L.get("device_overridden"):
+                    raise RuntimeError(
+                        f"ckpt 已在共享缓存被改道至 {self._dev}，"
+                        f"拒绝再迁到 {want}（请分进程）")
+                self._L["model"].to(want)
+                self._L["device"] = self._dev = want
+                self._L["device_overridden"] = True
 
     def topk(self, ob, legal: list[str], top: int = 5) -> list[tuple[str, float]]:
         """返回 [(动作描述, 概率)]，按温度校准 softmax；概率和=1。"""
@@ -28,6 +39,9 @@ class Adviser:
 
         from brain.serialize import laya_question, state_text
 
+        if not legal:
+            raise ValueError("topk：legal 为空，无可选动作")
+        top = max(1, int(top))  # 负/0 会让 out[:top] 静默丢尾或丢全
         if len(legal) == 1:
             a = json.loads(legal[0])
             return [(self._desc(a), 1.0)]
@@ -37,7 +51,7 @@ class Adviser:
             L["tok"], state_text(ob), q, L["max_len"], L["head_max_len"])
         if len(markers) != len(q["crit"]):
             raise ValueError("选项被序列截断（加大 head_max_len）")
-        dev = L["device"]
+        dev = self._dev  # 实例快照：与 __init__ 迁移决策一致，防共享字典被改
         batch = (
             torch.tensor([ids], dtype=torch.long),
             torch.ones(1, len(ids), dtype=torch.long),

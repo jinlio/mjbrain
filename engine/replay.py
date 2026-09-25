@@ -96,7 +96,12 @@ def replay_decisions(
         for pid in range(4):
             try:
                 ob = env.get_observation(pid)
-            except Exception:  # noqa: BLE001,S112 — 非行动帧的取观测异常视为无窗口
+            except BaseException as ex:  # noqa: BLE001,S110 — 非行动帧的取观测
+                # 异常视为无窗口。必须 BaseException：坏事件把 env 打成不一致态后，
+                # get_observation 抛的是 Rust PanicException（非 Exception 子类），
+                # 漏接会让整批训练数据生成崩进程（Ctrl-C 照常放行）
+                if isinstance(ex, (KeyboardInterrupt, SystemExit)):
+                    raise
                 continue
             if ob is None:
                 continue
@@ -121,7 +126,10 @@ def replay_decisions(
             observe()
             try:
                 env.apply_event(ev)
-            except Exception:  # noqa: BLE001 — 引擎对坏事件一律弃本场
+            except BaseException as ex:  # noqa: BLE001 — 引擎对坏事件一律弃本场
+                # （含 PanicException；中断信号放行）
+                if isinstance(ex, (KeyboardInterrupt, SystemExit)):
+                    raise
                 stats["apply_fail"] += 1
                 return
             continue
@@ -206,6 +214,9 @@ def replay_decisions(
                     stats["unresolved_window"] += 1
         try:
             env.apply_event(ev)
-        except Exception:  # noqa: BLE001 — 单场一条坏事件：弃本场
+        except BaseException as ex:  # noqa: BLE001 — 单场一条坏事件：弃本场
+            # （含 Rust PanicException，见 observe() 注释；中断信号放行）
+            if isinstance(ex, (KeyboardInterrupt, SystemExit)):
+                raise
             stats["apply_fail"] += 1
             return

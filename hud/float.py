@@ -101,6 +101,24 @@ def settings_path() -> pathlib.Path:
     return pathlib.Path.home() / ".mjbrain" / "hud.json"
 
 
+def norm_settings(settings: dict) -> dict:
+    """hud.json -> 六键齐全；坏值回退默认（可能被手改坏/旧版本写脏）。"""
+    def _num(key: str, cast, default):
+        try:
+            return cast(settings.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    return {
+        "x": _num("x", int, 40),
+        "y": _num("y", int, 40),
+        "alpha": _num("alpha", float, DEFAULT_ALPHA),
+        "font": _num("font", int, DEFAULT_FONT_SIZE),
+        "topmost": bool(settings.get("topmost", True)),
+        "locked": bool(settings.get("locked", False)),
+    }
+
+
 def load_settings() -> dict:
     p = settings_path()
     try:
@@ -131,14 +149,7 @@ class HudApp:
         self.advise = advise
         self.wait = wait
         self.poll_ms = poll_ms
-        self.s = {
-            "x": int(settings.get("x", 40)),
-            "y": int(settings.get("y", 40)),
-            "alpha": float(settings.get("alpha", DEFAULT_ALPHA)),
-            "font": int(settings.get("font", DEFAULT_FONT_SIZE)),
-            "topmost": bool(settings.get("topmost", True)),
-            "locked": bool(settings.get("locked", False)),
-        }
+        self.s = norm_settings(settings)  # 坏值回退默认，不炸启动（纯函数可单测）
         self.pos = 0
         self.shown = None  # 当前显示的文本（避免无变化重绘）
         self.shown_stale = False  # 当前是否处于置灰降级态（fg 只在翻转时改）
@@ -154,6 +165,14 @@ class HudApp:
         self.root.attributes("-topmost", self.s["topmost"])
         self.root.configure(bg="#101418")
         self.root.geometry(f"+{self.s['x']}+{self.s['y']}")
+        # 位置兜底：拔掉外接屏/改过分辨率后存的坐标可能整个在屏外，
+        # 无边框窗看不见又拖不着 → 回收进主屏 ±1 屏宽范围（纵坐标压回屏内）
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        cx = min(max(self.s["x"], -sw), 2 * sw)
+        cy = min(max(self.s["y"], 0), max(0, sh - 40))
+        if (cx, cy) != (self.s["x"], self.s["y"]):
+            self.s["x"], self.s["y"] = cx, cy
+            self.root.geometry(f"+{cx}+{cy}")
 
         fam = {"win32": "Microsoft YaHei",
                "darwin": "PingFang SC"}.get(sys.platform, "DejaVu Sans")

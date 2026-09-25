@@ -107,6 +107,11 @@ def _manual_env(args):
 
 
 def main() -> int:
+    # 重定向时 → 等字符在 Windows 本地编码下会 UnicodeEncodeError；兜重定向
+    import sys as _sys
+    for _s in (_sys.stdout, _sys.stderr):
+        if hasattr(_s, "reconfigure"):
+            _s.reconfigure(errors="replace")
     ap = argparse.ArgumentParser(description=__doc__)
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--raw", help="凤王 mjai 语料目录（含 data/*.parquet）")

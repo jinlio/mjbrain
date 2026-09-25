@@ -140,6 +140,11 @@ def table(per_seed, agg, specs, primary: str = "majsoul") -> list[dict]:
 
 
 def main() -> int:
+    # 报表含 →/± 等字符：重定向到管道/文件在 Windows 本地编码下不许炸
+    import sys
+    for _s in (sys.stdout, sys.stderr):
+        if hasattr(_s, "reconfigure"):
+            _s.reconfigure(errors="replace")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--bots", required=True, help="逗号分隔 4 个席位，如 B1,B0,B0,B0")
     ap.add_argument("--games", type=int, default=100, help="种子数（实际对局 = x4）")
@@ -151,7 +156,10 @@ def main() -> int:
     args = ap.parse_args()
 
     specs = [s.strip() for s in args.bots.split(",")]
-    assert len(specs) == 4, "--bots 需要恰好 4 个席位"
+    if len(specs) != 4:  # 显式校验而非 assert：python -O 下 assert 会被剥离
+        raise SystemExit(f"--bots 需要恰好 4 个席位，得 {len(specs)}")
+    if args.games < 1:  # 0/负数种子 → table() 除零、fmean([]) 裸 traceback
+        raise SystemExit(f"--games 须为 >=1 的种子数，得 {args.games}")
     per_seed, agg, secs = run(specs, args.games, args.seed_base, not args.tonpuusen)
     rows = table(per_seed, agg, specs, primary=args.pt_table)
 

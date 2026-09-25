@@ -156,3 +156,44 @@ def test_conservation_rejects_bad_river():
         draw=None, last=("6p", 3), oya=0)
     with pytest.raises(ValueError):
         build_events(spec)
+
+
+def _valid_spec(**over):
+    kw = dict(seat=0, oya=0, draw="5p",
+              hand=["1m", "2m", "3m", "4m", "5m", "6m", "7m", "8m", "9m",
+                    "1p", "2p", "3p", "4p"],
+              rivers=[[], [], [], []])
+    kw.update(over)
+    return BoardSpec(**kw)
+
+
+def test_validate_seat_and_oya_range():
+    with pytest.raises(ValueError, match=r"seat 须 0\.\.3"):
+        _valid_spec(seat=4).validate()
+    with pytest.raises(ValueError, match=r"oya 须 0\.\.3"):
+        _valid_spec(oya=5).validate()
+    _valid_spec().validate()  # 合法局面不许误伤
+
+
+def test_validate_last_frm_negative_rejected():
+    # 负 frm 过去静默拿 rivers[-1] 比对错误的河；现在给精确错
+    with pytest.raises(ValueError, match=r"last 的 from 须 0\.\.3，得 -1"):
+        _valid_spec(draw=None, last=("5m", -1)).validate()
+
+
+def test_validate_furo_bounds():
+    sp = _valid_spec(furos=[Furo(0, "pon", "5p", frm=4, consumed=["5p", "5p"],
+                                 pos=0)])
+    with pytest.raises(ValueError, match=r"furo\[0\] from 须 0\.\.3，得 4"):
+        sp.validate()
+    sp = _valid_spec(furos=[Furo(7, "pon", "5p", frm=1, consumed=["5p", "5p"],
+                                 pos=0)])
+    with pytest.raises(ValueError, match=r"furo\[0\] actor 须 0\.\.3，得 7"):
+        sp.validate()
+
+
+def test_furo_parse_friendly_type_errors():
+    with pytest.raises(ValueError, match="actor 非整数"):
+        Furo.parse("x|pon|5m|2")
+    with pytest.raises(ValueError, match="from 非整数"):
+        Furo.parse("1|pon|5m|z")

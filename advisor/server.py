@@ -182,6 +182,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    # 服务转印中文/异常文本重定向到文件时不许 UnicodeEncodeError 掀服务
+    import sys
+    for _s in (sys.stdout, sys.stderr):
+        if hasattr(_s, "reconfigure"):
+            _s.reconfigure(errors="replace")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)

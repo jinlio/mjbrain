@@ -59,6 +59,12 @@ def _parse_pos(s: str) -> tuple[int, int] | None:
 
 
 def main() -> int:
+    # 重定向到管道/文件时中文在 Windows 本地编码下可能 UnicodeEncodeError；
+    # errors=replace 只兜重定向，终端行为不变（全库 review 统一模式）
+    import sys as _sys
+    for _s in (_sys.stdout, _sys.stderr):
+        if hasattr(_s, "reconfigure"):
+            _s.reconfigure(errors="replace")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--url", required=True)
     ap.add_argument("--out", default="", help="帧 JSONL 落盘路径（默认临时目录）")
@@ -157,7 +163,12 @@ def main() -> int:
                 if args.seconds and time.time() - t0 > args.seconds:
                     stop.set()
             if not task.done():
-                await asyncio.wait_for(task, timeout=3)
+                try:
+                    await asyncio.wait_for(task, timeout=3)
+                except (TimeoutError, asyncio.TimeoutError):
+                    # 收尾卡住=事件循环里还有长 await；裸抛 TimeoutError 会让
+                    # 正常收工变非零退出+traceback，取消它安静走
+                    task.cancel()
 
         try:
             asyncio.run(run())

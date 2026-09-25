@@ -73,7 +73,8 @@ def detect_device() -> str:
         import torch  # noqa: PLC0415
     except ImportError:
         return "cpu"
-    if torch.backends.mps.is_available():
+    # getattr 守卫：老/非 mac 的 torch 构建没有 backends.mps 属性，直取 AttributeError
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
         return "mps"
     if torch.cuda.is_available():
         return "cuda"
@@ -167,6 +168,12 @@ def spawn(cmds: dict[str, list[str]]) -> dict[str, subprocess.Popen]:
 
 
 def main(argv=None) -> int:
+    # stdout 重定向到管道/文件时按本地编码(cp936/cp1252)写：✓/✗ 等字符会
+    # UnicodeEncodeError 掀掉整跑。errors=replace 只兜重定向，终端行为不变
+    import sys as _sys
+    for _s in (_sys.stdout, _sys.stderr):
+        if hasattr(_s, "reconfigure"):
+            _s.reconfigure(errors="replace")
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--url", default=DEFAULT_URL)

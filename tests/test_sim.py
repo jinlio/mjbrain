@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from engine.sim import MahjongSim
 from eval import BOTS
 
@@ -57,3 +59,28 @@ def test_heuristic_beats_random():
         b1 += rows[0]["top1"] + rows[1]["top1"]
         b0 += rows[2]["top1"] + rows[3]["top1"]
     assert b1 > b0
+
+
+def test_play_requires_four_bots():
+    # 3 个 bot 过去撞进 env 才炸出裸 IndexError；现在进门即有说明的 ValueError
+    bots = [BOTS["B1"](seed=i) for i in range(3)]
+    with pytest.raises(ValueError, match="4 个 bot"):
+        MahjongSim(seed=0).play(bots)
+
+
+def test_b1_rejects_empty_legal():
+    with pytest.raises(ValueError, match="legal_actions 为空"):
+        BOTS["B1"](seed=0).react([], 0, [])
+
+
+def test_arena_main_input_guards(monkeypatch):
+    import sys
+
+    import eval.arena as arena
+    monkeypatch.setattr(sys, "argv", ["arena", "--bots", "B1,B0,B0"])
+    with pytest.raises(SystemExit, match="恰好 4"):
+        arena.main()
+    monkeypatch.setattr(sys, "argv",
+                        ["arena", "--bots", "B1,B0,B0,B0", "--games", "0"])
+    with pytest.raises(SystemExit, match="games"):
+        arena.main()

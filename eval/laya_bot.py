@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import json
 import pathlib
+import threading
 from collections import Counter
 
 _CACHE: dict[str, dict] = {}
+_LOCK = threading.Lock()  # 多线程首载同 ckpt 会双份模型进显存
 
 
 def _load(ckpt: str) -> dict:
@@ -25,19 +27,37 @@ def _load(ckpt: str) -> dict:
     from safetensors.torch import load_file
     from transformers import AutoTokenizer
 
-    key = str(pathlib.Path(ckpt).resolve())
+    # expanduser：cmd/PowerShell 不展开 ~，env 里写 ~/ckpt 要能认
+    key = str(pathlib.Path(ckpt).expanduser().resolve())
     if key in _CACHE:
         return _CACHE[key]
+    with _LOCK:
+        if key in _CACHE:  # 等锁期间别人已载好
+            return _CACHE[key]
+        return _build_locked(key)
+
+
+def _build_locked(key: str) -> dict:
+    import torch
+    from laya.common import build_model
+    from safetensors.torch import load_file
+    from transformers import AutoTokenizer
+
     p = pathlib.Path(key)
     with open(p / "rl_agent_config.json", encoding="utf-8") as f:
         cfg = json.load(f)
-    tok = AutoTokenizer.from_pretrained(p / "tokenizer")
+    tok_dir = p / "tokenizer"
+    if not tok_dir.exists():
+        # 不给 from_pretrained 兜底成 hub repo-id 的机会：离线机整挂起重试
+        raise RuntimeError(f"tokenizer 目录缺失：{tok_dir}（Release 解压不全？）")
+    tok = AutoTokenizer.from_pretrained(tok_dir)
     model = build_model(cfg, encoder_dir=str(p / "encoder"))
     model.load_state_dict(load_file(str(p / "model.safetensors")), strict=True)
     if torch.cuda.is_available():
         device = torch.device("cuda")
-    elif torch.backends.mps.is_available():
+    elif getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
         device = torch.device("mps")  # 外协 Mac（M 系）走 MPS；fp32，autocast 仅 cuda 开
+        # getattr 守卫：老/非 mac torch 构建没有 backends.mps 属性，直取 AttributeError
     else:
         device = torch.device("cpu")
     model.to(device).eval()
@@ -61,7 +81,7 @@ class LayaBot:
         import os
 
         ck = ckpt or os.environ.get("MJ_LAYA_CKPT", "")
-        if not ck or not pathlib.Path(ck).exists():
+        if not ck or not pathlib.Path(ck).expanduser().exists():
             raise RuntimeError("B3 需要 ckpt 目录或环境变量 MJ_LAYA_CKPT")
         self._L = _load(ck)
         self._seed = seed
@@ -89,31 +109,36 @@ class LayaBot:
             self.stats["forced_single"] += 1
             return legal_actions[0]
 
-        state = state_text(ob)
-        q = laya_question(legal_actions)
-        ids, markers = build_sequence(
-            self._L["tok"], state, q, self._L["max_len"], self._L["head_max_len"]
-        )
-        if len(markers) != len(q["crit"]):
-            return fallback("head_truncated")
+        try:  # 前向段（build_sequence/模型/tokenizer）任何异常：弃这一手
+            # 过牌继续，数小时的 arena 长跑不许被一次 OOM/MPS 抖动打断；
+            # 成功路径数值零改动（纯兜底，fallback 统计键 forward_error）
+            state = state_text(ob)
+            q = laya_question(legal_actions)
+            ids, markers = build_sequence(
+                self._L["tok"], state, q, self._L["max_len"], self._L["head_max_len"]
+            )
+            if len(markers) != len(q["crit"]):
+                return fallback("head_truncated")
 
-        L, K = len(ids), len(markers)
-        dev = self._L["device"]
-        batch = (
-            torch.tensor([ids], dtype=torch.long),
-            torch.ones(1, L, dtype=torch.long),
-            torch.tensor([markers], dtype=torch.long),
-            torch.ones(1, K, dtype=torch.bool),
-            torch.tensor([0], dtype=torch.long),
-        )
-        with (
-            torch.no_grad(),
-            torch.autocast(dev.type, dtype=torch.float16, enabled=dev.type == "cuda"),
-        ):
-            logits, _ = self._L["model"](*(x.to(dev) for x in batch))
-        z = logits.float().cpu().numpy()[0, :K]
-        tkey = temp_bucket(0, K)
-        t = self._L["temps_by_opts"].get(tkey, self._L["temps"][0])
-        z = z / max(1e-3, float(t))
-        self.stats["act"] += 1
-        return legal_actions[int(np.argmax(z))]
+            L, K = len(ids), len(markers)
+            dev = self._L["device"]
+            batch = (
+                torch.tensor([ids], dtype=torch.long),
+                torch.ones(1, L, dtype=torch.long),
+                torch.tensor([markers], dtype=torch.long),
+                torch.ones(1, K, dtype=torch.bool),
+                torch.tensor([0], dtype=torch.long),
+            )
+            with (
+                torch.no_grad(),
+                torch.autocast(dev.type, dtype=torch.float16, enabled=dev.type == "cuda"),
+            ):
+                logits, _ = self._L["model"](*(x.to(dev) for x in batch))
+            z = logits.float().cpu().numpy()[0, :K]
+            tkey = temp_bucket(0, K)
+            t = self._L["temps_by_opts"].get(tkey, self._L["temps"][0])
+            z = z / max(1e-3, float(t))
+            self.stats["act"] += 1
+            return legal_actions[int(np.argmax(z))]
+        except Exception:  # noqa: BLE001 — 见上：仅兜住原本会崩整跑的路径
+            return fallback("forward_error")

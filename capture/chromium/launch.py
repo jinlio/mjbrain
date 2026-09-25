@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import shutil
 import socket
 import subprocess
 import sys
@@ -35,16 +36,29 @@ def find_browser() -> pathlib.Path:
             r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
             r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
         ]
-    else:  # mac/linux 分支：M4 档1 主平台 Windows，这里只做最小兜底
+    elif sys.platform == "darwin":
         cands = [
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+    else:  # linux：包名/发行版路径各异，硬编码候选 + PATH 兜底
+        cands = [
             "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
             "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/snap/bin/chromium",
         ]
     for c in cands:
         p = pathlib.Path(c)
         if p.exists():
             return p
+    # 候选表没命中再按裸命令查 PATH（覆盖自装/非标准路径，win 上也有意义）
+    for name in ("chrome", "google-chrome", "chromium", "msedge"):
+        w = shutil.which(name)
+        if w:
+            return pathlib.Path(w)
     raise RuntimeError("找不到 Chrome/Edge：装一个或在 cands 里加路径")
 
 
@@ -130,7 +144,10 @@ def read_devtools_port(profile: pathlib.Path, timeout: float = 20.0) -> int:
             line = f.read_text(encoding="utf-8").splitlines()[0].strip()
             if line:
                 return int(line)
-        except (FileNotFoundError, ValueError):
+        except (OSError, ValueError, IndexError):
+            # 竞态即本函数在等的事：文件半写（splitlines()[0] 越界）、
+            # Windows 下 Chrome 持写锁（PermissionError）——都不能掀桌。
+            # 与 try_attach 的捕获面对齐
             time.sleep(0.25)
     raise TimeoutError(f"{f} 未出现：浏览器可能没带 --remote-debugging-port 启动")
 
@@ -151,7 +168,11 @@ def browser_ws_url(port: int, timeout: float = 20.0) -> str:
 
 def reclaim_stale(profile: pathlib.Path) -> list[int]:
     """杀掉命令行里带同一 user-data-dir 的遗留浏览器主进程（排除 --type= 子进程）。
-    Windows-only 实现够用（M4 主平台）；返回被杀 PID。"""
+    Windows-only 实现（M4 主平台）；非 Windows 安静返回空（宁漏不误杀），
+    返回被杀 PID。"""
+    if sys.platform != "win32":
+        return []
+
     import subprocess
 
     needle = f"--user-data-dir={profile}".lower()

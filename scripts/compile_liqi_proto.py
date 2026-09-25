@@ -34,6 +34,9 @@ def main() -> int:
         print(r.stdout, r.stderr)
         return 1
     gen = OUT / "liqi_pb2.py"
+    if not gen.exists():  # protoc 退 0 却没产出（proto 缺失被 -I 静默容忍等）
+        print(f"protoc 正常退出但产物缺失：{gen}")
+        return 1
     print(f"{gen.name}: {gen.stat().st_size // 1024} KB")
     return 0
 

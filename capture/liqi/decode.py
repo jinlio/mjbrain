@@ -55,13 +55,19 @@ def decode_wrapper(buf: bytes) -> Wrapper:
             raise ValueError(f"Wrapper 字段 {fn} wiretype {wt} 非 LEN")
         ln = 0
         shift = 0
-        while True:  # varint
+        while True:  # varint：坏数据要报 ValueError（=丢帧），不许 IndexError 冒头
+            if i >= len(buf):
+                raise ValueError("Wrapper varint 截断")
             b = buf[i]
             i += 1
             ln |= (b & 0x7F) << shift
             if not b & 0x80:
                 break
             shift += 7
+            if shift > 63:
+                raise ValueError("Wrapper varint 超长")
+        if i + ln > len(buf):
+            raise ValueError("Wrapper 字段长度越界（截断/畸形帧）")
         chunk = buf[i : i + ln]
         i += ln
         if fn == 1:
@@ -73,6 +79,7 @@ def decode_wrapper(buf: bytes) -> Wrapper:
 
 # ---------------- 帧级路由 ----------------
 NOTIFY, REQUEST, RESPONSE = 1, 2, 3
+_PENDING_MAX = 1024  # 每连接 pending 上限；不应答孤儿条目的老化线
 
 
 @dataclass(frozen=True)
@@ -141,6 +148,11 @@ class LiqiParser:
                     return None  # 无路由=非游戏 RPC，静默（Akagi Err 分支同语义）
                 payload = self.message_to_dict(spec["req"].lstrip("."), w.data)
                 self._pending[msg_id] = (w.name, spec["resp"].lstrip("."))
+                # 不应答的孤儿条目不无界堆积（msg_id 16 位会回绕，最老先丢；
+                # 被丢 id 的迟到 response 走下面 pair=None 静默分支，行为同前）
+                if len(self._pending) > _PENDING_MAX:
+                    for k in list(self._pending)[: len(self._pending) - _PENDING_MAX]:
+                        self._pending.pop(k, None)
                 return Frame(REQUEST, w.name, msg_id, payload)
             if w.name:
                 raise ValueError(f"response wrapper 不应带 name，得 {w.name!r}")

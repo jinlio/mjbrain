@@ -9,6 +9,7 @@ riichienv 的 Action/Observation 对象不外漏，方便将来换引擎。
 
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -36,8 +37,10 @@ class EventsView(Sequence):
         if len(raw) < len(self._parsed):  # 不应发生（reset 后重建视图）
             self._parsed.clear()
         for s in raw[len(self._parsed):]:
-            # riichienv 的 mjai_log 元素已是 dict；其它来源给 JSON 字符串
-            self._parsed.append(json.loads(s) if isinstance(s, str) else s)
+            # riichienv 的 mjai_log 元素已是 dict；其它来源给 JSON 字符串。
+            # 原生 dict 入缓存必须 deepcopy：若引擎后续复用同一对象原地改，
+            # "惰性历史视图"会看到被篡改的过去（n≤2k，防御成本可忽略）
+            self._parsed.append(json.loads(s) if isinstance(s, str) else copy.deepcopy(s))
 
     def __len__(self) -> int:
         self._refresh()
@@ -85,7 +88,8 @@ class MahjongSim:
         return [str(a.to_mjai()) for a in ob.legal_actions()]
 
     def events(self) -> EventsView:
-        assert self._view is not None, "先 reset()"
+        if self._view is None:  # assert 会被 python -O 剥离，显式 raise
+            raise RuntimeError("先 reset()")
         return self._view
 
     def step(self, actions: dict[int, str]) -> None:
@@ -103,7 +107,8 @@ class MahjongSim:
         return list(self._env.scores())
 
     def play(self, bots: list[Bot]) -> GameResult:
-        assert len(bots) == 4, "4p 需要 4 个 bot"
+        if len(bots) != 4:  # 同上：-O 下 assert 失效会变裸 IndexError
+            raise ValueError("4p 需要 4 个 bot")
         self.reset()
         steps = 0
         while not self.done:

@@ -74,3 +74,19 @@ def test_settings_roundtrip(tmp_path, monkeypatch):
     # 坏文件 → 空设置而非崩
     hud.settings_path().write_text("{broken", encoding="utf-8")
     assert hud.load_settings() == {}
+
+
+def test_norm_settings_coerces_dirty_values():
+    # hud.json 被手改坏（font 写成 "big"）不能让 Tk 启动抛 ValueError
+    s = hud.norm_settings({"x": "40", "y": None, "font": "big",
+                           "alpha": "not-a-float", "topmost": 0, "locked": "1"})
+    assert s["x"] == 40
+    assert s["y"] == 40
+    assert s["font"] == hud.DEFAULT_FONT_SIZE
+    assert s["alpha"] == hud.DEFAULT_ALPHA
+    assert s["topmost"] is False and s["locked"] is True
+
+
+def test_norm_settings_returns_all_six_keys():
+    assert sorted(hud.norm_settings({})) == ["alpha", "font", "locked",
+                                             "topmost", "x", "y"]
