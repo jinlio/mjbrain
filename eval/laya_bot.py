@@ -5,8 +5,8 @@
 Observation** 递进来 —— 与训练语料完全同源的 obs（同为 get_observation
 产物），state_text 零漂移。遮蔽由引擎负责，本模块零手工特征。
 
-流程：state_text -> laya_question -> build_sequence -> 单次前向 ->
-按校准温度（temp_bucket 优先，回退 qtype 表）取 argmax。
+流程：brain.infer.forward_scaled_logits（与线上 advisor 共用的唯一前向核）
+-> 按校准温度（temp_bucket 优先，回退 qtype 表）取 argmax。
 """
 
 from __future__ import annotations
@@ -88,11 +88,7 @@ class LayaBot:
         self.stats = Counter()
 
     def react(self, events, seat: int, legal_actions: list[str], *, ob=None) -> str:
-        import numpy as np
-        import torch
-        from laya.common import build_sequence, temp_bucket
-
-        from brain.serialize import laya_question, state_text
+        import brain.infer as infer
 
         def fallback(why: str) -> str:
             self.stats[why] += 1
@@ -111,34 +107,13 @@ class LayaBot:
 
         try:  # 前向段（build_sequence/模型/tokenizer）任何异常：弃这一手
             # 过牌继续，数小时的 arena 长跑不许被一次 OOM/MPS 抖动打断；
-            # 成功路径数值零改动（纯兜底，fallback 统计键 forward_error）
-            state = state_text(ob)
-            q = laya_question(legal_actions)
-            ids, markers = build_sequence(
-                self._L["tok"], state, q, self._L["max_len"], self._L["head_max_len"]
-            )
-            if len(markers) != len(q["crit"]):
-                return fallback("head_truncated")
-
-            L, K = len(ids), len(markers)
-            dev = self._L["device"]
-            batch = (
-                torch.tensor([ids], dtype=torch.long),
-                torch.ones(1, L, dtype=torch.long),
-                torch.tensor([markers], dtype=torch.long),
-                torch.ones(1, K, dtype=torch.bool),
-                torch.tensor([0], dtype=torch.long),
-            )
-            with (
-                torch.no_grad(),
-                torch.autocast(dev.type, dtype=torch.float16, enabled=dev.type == "cuda"),
-            ):
-                logits, _ = self._L["model"](*(x.to(dev) for x in batch))
-            z = logits.float().cpu().numpy()[0, :K]
-            tkey = temp_bucket(0, K)
-            t = self._L["temps_by_opts"].get(tkey, self._L["temps"][0])
-            z = z / max(1e-3, float(t))
-            self.stats["act"] += 1
-            return legal_actions[int(np.argmax(z))]
+            # 成功路径数值零改动（纯兜底，fallback 统计键 forward_error）。
+            # "fp16" 即历史口径：cuda 上半精度，其余设备 fp32。
+            z = infer.forward_scaled_logits(
+                self._L, self._L["device"], ob, legal_actions, "fp16")
+        except infer.Truncated:
+            return fallback("head_truncated")
         except Exception:  # noqa: BLE001 — 见上：仅兜住原本会崩整跑的路径
             return fallback("forward_error")
+        self.stats["act"] += 1
+        return legal_actions[int(z.argmax())]

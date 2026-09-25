@@ -92,6 +92,11 @@ curl -s -X POST http://127.0.0.1:8765/v1/react \
 
 服务对输入只做重放与推荐：事件流原样重演出决策窗，在合法动作集上给出带概率的 top-N；服务端没有替玩家发动作的代码路径。健康检查 `GET /v1/health`。
 
+> **精度档**：advisor 与 arena B3 共用 `brain/infer.py` 唯一前向核，差别只剩精度参数——
+> advisor 默认 `fp32`（历史线上口径）；设环境变量 `MJBRAIN_ADVISOR_PRECISION=fp16`
+> （CUDA 上生效，其余设备等同 fp32）即与发布成绩 top1 74.1% 的实测策略逐位一致。
+> 切换线上口径前先在 Windows 主机做平价审计（见 `scripts/precision_parity.py`）。
+
 ### 实时捕获（可选，全程只读）
 
 ```bash

@@ -10,11 +10,20 @@ import json
 
 
 class Adviser:
-    def __init__(self, ckpt: str, device: str | None = None) -> None:
+    def __init__(self, ckpt: str, device: str | None = None,
+                 precision: str | None = None) -> None:
+        """precision: "fp32"（默认=线上历史口径）| "fp16"（cuda 上半精度，
+        与 arena B3 即发布成绩 74.1% 的实测策略逐位一致）。None 时读
+        MJBRAIN_ADVISOR_PRECISION；非法值构造期即报错，不留到决策点。"""
+        import os
+
         import torch
 
+        from brain import infer
         from eval.laya_bot import _load
 
+        self._prec = infer.check_precision(
+            precision or os.environ.get("MJBRAIN_ADVISOR_PRECISION", "fp32"))
         self._L = _load(ckpt)
         self._dev = self._L["device"]
         if device:
@@ -32,12 +41,14 @@ class Adviser:
                 self._L["device_overridden"] = True
 
     def topk(self, ob, legal: list[str], top: int = 5) -> list[tuple[str, float]]:
-        """返回 [(动作描述, 概率)]，按温度校准 softmax；概率和=1。"""
-        import numpy as np
-        import torch
-        from laya.common import build_sequence, temp_bucket
+        """返回 [(动作描述, 概率)]，按温度校准 softmax；概率和=1。
 
-        from brain.serialize import laya_question, state_text
+        前向走 brain.infer 唯一核（与 arena B3 同一实现）；精度档 =
+        self._prec。默认 fp32 与旧行为逐位一致（fp32 路径不建 autocast）。
+        """
+        import numpy as np
+
+        from brain import infer
 
         if not legal:
             raise ValueError("topk：legal 为空，无可选动作")
@@ -45,29 +56,13 @@ class Adviser:
         if len(legal) == 1:
             a = json.loads(legal[0])
             return [(self._desc(a), 1.0)]
-        q = laya_question(legal)
-        L = self._L
-        ids, markers = build_sequence(
-            L["tok"], state_text(ob), q, L["max_len"], L["head_max_len"])
-        if len(markers) != len(q["crit"]):
-            raise ValueError("选项被序列截断（加大 head_max_len）")
-        dev = self._dev  # 实例快照：与 __init__ 迁移决策一致，防共享字典被改
-        batch = (
-            torch.tensor([ids], dtype=torch.long),
-            torch.ones(1, len(ids), dtype=torch.long),
-            torch.tensor([markers], dtype=torch.long),
-            torch.ones(1, len(markers), dtype=torch.bool),
-            torch.tensor([0], dtype=torch.long),
-        )
-        with torch.no_grad():
-            logits, _ = L["model"](*(x.to(dev) for x in batch))
-        z = logits.float().cpu().numpy()[0, : len(markers)]
-        t = L["temps_by_opts"].get(temp_bucket(0, len(markers)), L["temps"][0])
-        zz = z / max(1e-3, float(t))
+        # dev 传实例快照：与 __init__ 迁移决策一致，防共享字典被改
+        zz = infer.forward_scaled_logits(
+            self._L, self._dev, ob, legal, self._prec)
         p = np.exp(zz - zz.max())
         p /= p.sum()
         merged: dict[str, float] = {}
-        for i in range(len(markers)):
+        for i in range(len(zz)):
             desc = self._desc(json.loads(legal[i]))
             merged[desc] = merged.get(desc, 0.0) + float(p[i])
         out = sorted(merged.items(), key=lambda x: -x[1])

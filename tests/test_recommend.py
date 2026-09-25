@@ -1,7 +1,8 @@
-"""advisor.recommend 守卫：空 legal、top 钳制、共享缓存设备改道冲突。
+"""advisor.recommend 守卫：空 legal、top 钳制、共享缓存设备改道冲突、
+精度解析与端到端数值接线。
 
-全部走假模型（monkeypatch laya_bot._load），不碰真权重——本文件可在
-无 GPU/无 checkpoint 的机器上跑。
+全部走假模型（monkeypatch laya_bot._load + brain.infer 桩），不碰真权重——
+本文件可在无 GPU/无 checkpoint 的机器上跑。
 """
 
 from __future__ import annotations
@@ -53,3 +54,42 @@ def test_shared_cache_device_conflict_refused(entry):
     # 不显式给设备 → 沿用缓存现状，不动模型
     b = R.Adviser("fake")
     assert b._dev == torch.device("meta")
+
+
+def test_adviser_precision_resolution(entry, monkeypatch):
+    # 默认 = 线上历史口径 fp32；env 可切；显式参数压过 env；非法值构造期炸
+    assert R.Adviser("fake")._prec == "fp32"
+    monkeypatch.setenv("MJBRAIN_ADVISOR_PRECISION", "fp16")
+    assert R.Adviser("fake")._prec == "fp16"
+    assert R.Adviser("fake", precision="fp32")._prec == "fp32"
+    with pytest.raises(ValueError, match="precision"):
+        R.Adviser("fake", precision="fp64")
+
+
+def test_topk_end_to_end_probs(entry, monkeypatch):
+    import math
+
+    import laya.common
+
+    import brain.serialize as bs
+
+    class FixedModel:
+        def __call__(self, *xs):
+            return torch.tensor([[1.0, 3.0]]), None
+
+    entry["model"] = FixedModel()
+    entry.update(tok=None, max_len=8, head_max_len=8,
+                 temps=[2.0], temps_by_opts={})
+    legal = ['{"type":"dahai","pai":"5p"}', '{"type":"pon","pai":"5p"}']
+    monkeypatch.setattr(bs, "state_text", lambda ob: "S")
+    monkeypatch.setattr(
+        laya.common, "build_sequence",
+        lambda tok, st, q, a, b: (list(range(len(q["crit"]) + 1)),
+                                  list(range(len(q["crit"])))))
+    a = R.Adviser("fake")
+    out = a.topk("ob", legal, top=2)
+    # z=[0.5,1.5]（logits [1,3] / 温度 2）的 softmax——钉死与 core 的接线
+    e = math.exp(-1.0)
+    assert [d for d, _ in out] == ["pon:5p", "dahai:5p"]
+    assert out[0][1] == pytest.approx(1.0 / (1.0 + e))
+    assert out[1][1] == pytest.approx(e / (1.0 + e))
