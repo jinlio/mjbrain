@@ -8,6 +8,8 @@
 - **可拖动 + 记住位置**：左键按住整窗移动；`hud.json` 存绝对位置，下次启动复原。
   （曾实现"跟随浏览器窗口移动"，2026-09-24 真机验收体验不佳，已移除。）
 - **锁定/解锁**：右键菜单切换（或按 L 键）。锁定=不可拖，防误触。
+- **停更降级**：>90s 无新记录 → 置灰 + "无新事件 N 分钟"行（局后不再把
+  过期建议当现况）；下一条记录到达自动复原。
 
 形态与差异：
 - 全平台 overrideredirect 无边框 + -topmost 置顶 + -alpha 半透明。
@@ -28,9 +30,17 @@ import argparse
 import json
 import pathlib
 import sys
+import time
 
 DEFAULT_FONT_SIZE = 12
 DEFAULT_ALPHA = 0.85
+
+# 停更降级：超过宽限期没有新记录 → 置灰 + 追加"无新事件 N 分钟"一行。
+# HUD 是被动尾随者，局后文件停止增长，不降级就会把几小时前的过期建议
+# 当现况挂着（2026-09-25 午间局后 17:07 一条停一下午的复盘）。
+STALE_GRACE_S = 90.0
+FG_FRESH = "#dce8f4"
+FG_STALE = "#5b6672"
 
 
 # ---------- 渲染（纯函数，无 tk：可单测） ----------
@@ -71,6 +81,18 @@ def latest_record(lines: list[str]) -> dict | None:
         if isinstance(rec, dict):
             return rec
     return None
+
+
+def stale_lines(rec: dict | None, idle_s: float,
+                *, grace: float = STALE_GRACE_S) -> tuple[list[str], bool]:
+    """(显示行, 是否停更)。纯函数可单测：宽限期内=原样；停更后保留最后
+    一条供回看、追加时长按置灰降级；从未有过记录（初始态）不判停更。"""
+    lines = format_lines(rec)
+    if rec is None or idle_s <= grace:
+        return lines, False
+    mm = int(idle_s // 60)
+    t = str(rec.get("ts") or "")[11:19]
+    return [*lines, f"（无新事件 {mm} 分钟，停更于 {t or '?'}）"], True
 
 
 # ---------- 持久设置 ----------
@@ -119,6 +141,9 @@ class HudApp:
         }
         self.pos = 0
         self.shown = None  # 当前显示的文本（避免无变化重绘）
+        self.shown_stale = False  # 当前是否处于置灰降级态（fg 只在翻转时改）
+        self.rec_seen = None  # 最后一条已显示记录（停更时留档回看）
+        self.fresh_at = time.monotonic()  # 最后一次收到新记录的时刻
 
         self.root = tk.Tk()
         self.root.title("mjbrain HUD")
@@ -133,7 +158,7 @@ class HudApp:
         fam = {"win32": "Microsoft YaHei",
                "darwin": "PingFang SC"}.get(sys.platform, "DejaVu Sans")
         self.label = tk.Label(self.root, text="等待建议…", justify="left",
-                              anchor="w", fg="#dce8f4", bg="#101418",
+                              anchor="w", fg=FG_FRESH, bg="#101418",
                               font=(fam, self.s["font"]))
         self.label.pack(padx=10, pady=6)
 
@@ -219,11 +244,17 @@ class HudApp:
 
     def tick(self) -> None:
         rec = self._read_new()
-        if rec is not None:
-            text = "\n".join(format_lines(rec))
-            if text != self.shown:
-                self.shown = text
-                self.label.configure(text=text)
+        if rec is not None:  # 新记录：换页 + 回到"新鲜"计时起点
+            self.rec_seen = rec
+            self.fresh_at = time.monotonic()
+        lines, stale = stale_lines(self.rec_seen, time.monotonic() - self.fresh_at)
+        text = "\n".join(lines)
+        if text != self.shown:
+            self.shown = text
+            self.label.configure(text=text)
+        if stale != self.shown_stale:  # fg 只在置灰/复原翻转时改
+            self.shown_stale = stale
+            self.label.configure(fg=FG_STALE if stale else FG_FRESH)
         self.root.after(self.poll_ms, self.tick)
 
     def run(self) -> int:

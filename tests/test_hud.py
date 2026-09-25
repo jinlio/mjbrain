@@ -38,6 +38,27 @@ def test_format_lines_no_window_and_missing():
     assert "（该事件自家未开窗）" in lines
 
 
+def test_stale_lines_grace_keeps_normal_view():
+    rec = {"ts": "2026-09-25T17:07:25", "seat": 3, "zh_recommend": "立直"}
+    lines, stale = hud.stale_lines(rec, idle_s=89.9)
+    assert stale is False
+    assert lines == hud.format_lines(rec)
+
+
+def test_stale_lines_stale_appends_note():
+    rec = {"ts": "2026-09-25T17:07:25", "seat": 3, "zh_recommend": "立直"}
+    lines, stale = hud.stale_lines(rec, idle_s=600)
+    assert stale is True
+    assert lines[:-1] == hud.format_lines(rec)  # 最后一条留档回看
+    assert "无新事件 10 分钟" in lines[-1] and "17:07:25" in lines[-1]
+
+
+def test_stale_lines_never_seen_record_not_stale():
+    # 初始态（文件还没落第一行）不算"停更"，保持"等待建议…"亮色
+    lines, stale = hud.stale_lines(None, idle_s=10**6)
+    assert stale is False and lines == ["等待建议…"]
+
+
 def test_latest_record_skips_broken_lines():
     good = json.dumps({"seat": 2, "zh_recommend": "摸切"})
     assert hud.latest_record(["", "{trunc", good]) == {"seat": 2, "zh_recommend": "摸切"}
