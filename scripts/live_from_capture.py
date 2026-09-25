@@ -49,11 +49,14 @@ from advisor import zh  # noqa: E402 —— 显示层中文映射（日志 resp 
 STAT = {"path": None, "n": 0}
 
 
-def post_react(url: str, payload: dict, timeout: float = 30.0) -> dict:
+def post_react(url: str, payload: dict, timeout: float = 30.0, *,
+               allow_remote: bool = False) -> dict:
     from brain import net
-    # 校验贴着 sink：本函数任何调用方（含未来新增）都过同一道协议/host 闸，
-    # 不依赖调用前先规范化——污点在进入 urlopen 前最后一行被处置
+    # 协议规范化 + host 边界双闸都贴着 sink：本函数任何调用方（含未来
+    # 新增）不依赖调用前先校验过；事件流离本机必须是显式决定
     url = net.normalize_http_base(url, "advisor 地址")
+    if not allow_remote:
+        net.require_loopback(url, "advisor 地址")
     req = urllib.request.Request(
         url + "/v1/react",
         data=json.dumps(payload).encode("utf-8"),
@@ -190,7 +193,7 @@ def main(argv=None) -> int:
                 body["seat"] = int(seat)
             t_post = time.perf_counter()
             try:
-                resp = post_react(args.url, body)
+                resp = post_react(args.url, body, allow_remote=args.allow_remote)
                 last_err = None
             except (urllib.error.URLError, OSError) as ex:
                 if last_err is None:
