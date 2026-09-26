@@ -106,10 +106,14 @@ curl -s -X POST http://127.0.0.1:8765/v1/react \
 
 服务对输入只做重放与推荐：事件流原样重演出决策窗，在合法动作集上给出带概率的 top-N；服务端没有替玩家发动作的代码路径。健康检查 `GET /v1/health`。
 
-> **精度档**：advisor 与 arena B3 共用 `brain/infer.py` 唯一前向核，差别只剩精度参数——
-> advisor 默认 `fp32`（历史线上口径）；设环境变量 `MJBRAIN_ADVISOR_PRECISION=fp16`
-> （CUDA 上生效，其余设备等同 fp32）即与发布成绩 top1 74.1% 的实测策略逐位一致。
-> 切换线上口径前先在 Windows 主机做平价审计（见 `scripts/precision_parity.py`）。
+> **精度档**：advisor 与 arena B3 共用 `brain/infer.py` 唯一前向核，差别只剩精度参数一档。
+> 发布成绩 top1 74.1% 以 fp16（CUDA）测得；2026-09-24 用 `scripts/precision_parity.py`
+> 对真实牌谱做了 fp32↔fp16 平价审计：852 个决策窗 **top1 翻盘 0（0.00%）**，top3 概率
+> 漂移 |Δ| 均值 0.01%、最大 0.23%——两档只差显示尾数。据此**线上口径定为 fp16**（CUDA
+> 生效，其余设备自动等同 fp32）：`scripts/run_demo.py` 按设备自动导出
+> `MJBRAIN_ADVISOR_PRECISION=fp16`（`--advisor-precision fp32|fp16` 可显式覆盖）；
+> 手工起 `advisor.server` 时自行设该环境变量即可，不设则保持 fp32。
+> 复现审计：`python scripts/precision_parity.py --ckpt checkpoints/<run_id> --events <牌谱事件流.json>`。
 
 ### 实时捕获（可选，全程只读）
 

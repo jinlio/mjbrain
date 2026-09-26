@@ -189,6 +189,10 @@ def main(argv=None) -> int:
                     help="-1=自动取 AuthGame 识别的自家座位")
     ap.add_argument("--ckpt", default=None, help="权重目录（缺省按链探测）")
     ap.add_argument("--device", default="", help="advisor --device（空=自动）")
+    ap.add_argument("--advisor-precision", default="", choices=["", "fp32", "fp16"],
+                    help="advisor 推理精度（空=自动：CUDA 上走 fp16，平价审计"
+                         " 2026-09-24 见 README；非 CUDA 走 fp32）。"
+                         "已导出 MJBRAIN_ADVISOR_PRECISION 时尊重环境")
     ap.add_argument("--top", type=int, default=5, help="advisor top-k")
     ap.add_argument("--window-size", default="1600x900")
     ap.add_argument("--window-position", default="")
@@ -210,10 +214,19 @@ def main(argv=None) -> int:
         return 1
 
     device = args.device or detect_device()
+    # advisor 推理精度：显式 flag > 已导出环境变量 > 自动档（CUDA→fp16）。
+    # 自动档依据 2026-09-24 平价审计（README「精度档」）：fp32 vs fp16
+    # 在真实牌谱 852 决策窗 top1 零翻盘、top3 漂移可忽略——线上用 fp16 省显存提速，
+    # 与 arena/发布口径一致。spawn 的子进程继承 os.environ，故在此设一次即可。
+    prec = (args.advisor_precision or
+            os.environ.get("MJBRAIN_ADVISOR_PRECISION") or
+            ("fp16" if device == "cuda" else "fp32"))
+    os.environ["MJBRAIN_ADVISOR_PRECISION"] = prec
     cmds = build_cmds(args, ckpt, frames, advise, device)
     if args.no_hud:
         cmds.pop("hud")
-    print(f"[run_demo] advisor={device}  ckpt={ckpt}\n[run_demo] 帧记录 -> {frames}")
+    print(f"[run_demo] advisor={device}/{prec}  ckpt={ckpt}\n"
+          f"[run_demo] 帧记录 -> {frames}")
 
     procs: dict[str, subprocess.Popen] = {}
     try:
