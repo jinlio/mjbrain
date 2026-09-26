@@ -164,7 +164,7 @@ def _build_base(pairs_dir: pathlib.Path, raw_dir: pathlib.Path, tok,
     ).hexdigest()[:16]
     cache = fp / f"base-{pairs_dir.name}-{sig}.pt"
     if cache.exists():
-        data = torch.load(cache, weights_only=False)
+        data = torch.load(cache, weights_only=True)
         stats["items_cache_hit"] += 1
         return data["train"], data["val"]
 
@@ -512,7 +512,7 @@ def main() -> int:
     start_epoch = 0
     start_batch = 0
     if args.resume:
-        st = torch.load(args.resume, weights_only=False)
+        st = torch.load(args.resume, weights_only=True)
         saved_opt = st.get("opt", "adamw")
         if saved_opt != args.opt:
             raise SystemExit(
